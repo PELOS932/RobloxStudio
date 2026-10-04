@@ -66,6 +66,9 @@ Example pages to try are in `examples/html/`.
 | Optional 1-hour prompt cache | Coming back from testing in Studio doesn't re-pay the whole context |
 | "Studio (lean)" tool mode | Built-in Claude Code tools are left out of the prompt unless you choose "Full Claude Code" |
 | Short asset ids, terse tool results, Studio results capped | Keeps tool traffic small |
+| Spec shorthand: shared `styles`, `repeat`, `copies` and group `clones` (models), `styles` (UIs), expanded on the server | Claude writes repetitive builds once. In a test run, Claude sent 3.2 KB for a 78-part farm scene whose full spec is 9.4 KB (66% less to generate) |
+| Slim tool schemas: no regex/length noise, edit tools refer to the create tools' formats, built once | The tool list in every prompt went from ~10k to ~5.5k tokens; calls are still validated against the full schemas |
+| Lean import Luau: Roblox defaults are left out, constructors and fonts are shared, part flags are packed, models move with native `Model:PivotTo` | Scripts sent to Studio are 18–44% smaller (item shop UI 44.6 → 24.9 KB, cabin 14.9 → 12.2 KB), so they compile and run faster |
 
 ## Requirements
 

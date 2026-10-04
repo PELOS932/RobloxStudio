@@ -128,9 +128,21 @@ export function modelToLuau(spec: ModelSpec, opts: ImportOptions = {}): LuauResu
     return i + 1;
   };
 
+  // Group paths and the most common flag set are shared; trailing defaults are left out.
+  const groups: string[] = [];
+  const groupIndex = (g: string) => {
+    if (!g) return 0;
+    let i = groups.indexOf(g);
+    if (i < 0) i = groups.push(g) - 1;
+    return i + 1;
+  };
+  const flagCounts = new Map<number, number>();
+  for (const p of parts) flagCounts.set(partFlags(p), (flagCounts.get(partFlags(p)) ?? 0) + 1);
+  const defaultFlags = [...flagCounts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 13;
+
   const lines: string[] = [];
   for (const p of parts) {
-    const call = partCall(p, matIndex(p.material));
+    const call = partCall(p, matIndex(p.material), groupIndex(p.group), defaultFlags);
     if (p.light) {
       const l = p.light;
       const extra = l.className === "PointLight" ? "" : `, ${luaNum(l.angle)}, Enum.NormalId.${l.face}`;
@@ -169,8 +181,12 @@ local ok, result = pcall(function()
 	end
 	local MAT = { ${materials.map((m) => `Enum.Material.${m}`).join(", ")} }
 	local SHAPE = { Enum.PartType.Block, Enum.PartType.Ball, Enum.PartType.Cylinder }
+	local G = { ${groups.map((g) => luaString(g)).join(", ")} }
+	local DEFAULT_FLAGS = ${defaultFlags}
 	local count = 0
-	local function P(shape, name, sx, sy, sz, cf, r, g, b, mat, transparency, reflectance, collide, touch, shadow, anchored, groupPath)
+	-- flags: 1 CanCollide, 2 CanTouch, 4 CastShadow, 8 Anchored
+	local function P(shape, name, sx, sy, sz, cf, r, g, b, mat, groupIndex, flags, transparency, reflectance)
+		flags = flags or DEFAULT_FLAGS
 		local part = Instance.new(if shape == 4 then "WedgePart" else "Part")
 		if shape ~= 4 then part.Shape = SHAPE[shape] end
 		part.Name = name
@@ -178,15 +194,15 @@ local ok, result = pcall(function()
 		part.CFrame = cf
 		part.Color = Color3.fromRGB(r, g, b)
 		part.Material = MAT[mat]
-		part.Transparency = transparency
-		part.Reflectance = reflectance
-		part.Anchored = anchored
-		part.CanCollide = collide
-		part.CanTouch = touch
-		part.CastShadow = shadow
+		part.Transparency = transparency or 0
+		part.Reflectance = reflectance or 0
+		part.Anchored = bit32.btest(flags, 8)
+		part.CanCollide = bit32.btest(flags, 1)
+		part.CanTouch = bit32.btest(flags, 2)
+		part.CastShadow = bit32.btest(flags, 4)
 		part.TopSurface = Enum.SurfaceType.Smooth
 		part.BottomSurface = Enum.SurfaceType.Smooth
-		part.Parent = group(groupPath)
+		part.Parent = group(G[groupIndex or 0])
 		count += 1
 		return part
 	end
@@ -206,6 +222,8 @@ ${lines.join("\n")}
 	local pivot = CFrame.new(${pivot.map((v) => luaNum(v)).join(", ")})
 	model.WorldPivot = pivot
 	local function pivotTo(target)
+		-- Model:PivotTo moves every part natively; the loop below is the fallback.
+		if pcall(function() model:PivotTo(target) end) then return end
 		local delta = target * pivot:Inverse()
 		for _, d in model:GetDescendants() do
 			if d:IsA("BasePart") then d.CFrame = delta * d.CFrame end
@@ -257,56 +275,76 @@ return forgeFinish(ok, result)
   return { code, stats };
 }
 
-function partCall(p: NativePart, mat: number): string {
+function partFlags(p: NativePart): number {
+  return (p.canCollide ? 1 : 0) | (p.canTouch ? 2 : 0) | (p.castShadow ? 4 : 0) | (p.anchored ? 8 : 0);
+}
+
+function partCall(p: NativePart, mat: number, group: number, defaultFlags: number): string {
   const shape = p.className === "WedgePart" ? 4 : p.shape === "Ball" ? 2 : p.shape === "Cylinder" ? 3 : 1;
   const isIdentity = p.rot.every((v, i) => Math.abs(v - [1, 0, 0, 0, 1, 0, 0, 0, 1][i]) < 1e-9);
   const pos = p.pos.map((v) => luaNum(v)).join(", ");
   const cf = isIdentity ? `C(${pos})` : `C(${pos}, ${p.rot.map((v) => luaNum(v, 6)).join(", ")})`;
-  const g = p.group ? luaString(p.group) : "nil";
-  return `P(${shape}, ${luaString(p.name)}, ${p.size.map((v) => luaNum(v)).join(", ")}, ${cf}, ${p.color.join(", ")}, ${mat}, ${luaNum(p.transparency, 3)}, ${luaNum(p.reflectance, 3)}, ${p.canCollide}, ${p.canTouch}, ${p.castShadow}, ${p.anchored}, ${g})`;
+  const args = [String(shape), luaString(p.name), ...p.size.map((v) => luaNum(v)), cf, ...p.color.map(String), String(mat)];
+  // Optional tail: group index, flags, transparency, reflectance (defaults 0, DEFAULT_FLAGS, 0, 0).
+  const tail = [String(group), String(partFlags(p)), luaNum(p.transparency, 3), luaNum(p.reflectance, 3)];
+  const defaults = ["0", String(defaultFlags), "0", "0"];
+  while (tail.length && tail[tail.length - 1] === defaults[tail.length - 1]) tail.pop();
+  return `P(${[...args, ...tail].join(", ")})`;
 }
 
 // ---------------------------------------------------------------------------
 // UI
 
-const color3 = (hex: string) => `Color3.fromRGB(${hexToRgb(hex).join(", ")})`;
-const udim2 = (u: number[]) => `UDim2.new(${u.map((v) => luaNum(v)).join(", ")})`;
+// Short aliases keep the generated script small (U2/C3/V2/UD are defined in the script).
+const color3 = (hex: string) => `C3(${hexToRgb(hex).join(", ")})`;
+const udim2 = (u: number[]) => `U2(${u.map((v) => luaNum(v)).join(", ")})`;
+const udim = (scale: number, offset: number) => `UD(${luaNum(scale)}, ${luaNum(offset)})`;
 const X_ALIGN = { left: "Left", center: "Center", right: "Right" } as const;
 const Y_ALIGN = { top: "Top", center: "Center", bottom: "Bottom" } as const;
 const AUTO = { x: "X", y: "Y", xy: "XY" } as const;
 
-function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: { n: number }) {
+interface UiEmit {
+  out: string[];
+  n: number;
+  /** Font.new(...) expressions, shared through a table in the script. */
+  fonts: string[];
+}
+
+function fontRef(font: keyof typeof FONTS, e: UiEmit): string {
+  const expr = `Font.new(${luaString(fontFamilyUrl(font))}, Enum.FontWeight.${FONT_WEIGHT_NAMES[FONTS[font].weight]}, Enum.FontStyle.${FONTS[font].style})`;
+  let i = e.fonts.indexOf(expr);
+  if (i < 0) i = e.fonts.push(expr) - 1;
+  return `F[${i + 1}]`;
+}
+
+/**
+ * One node and its modifiers. Only values that differ from what Instance.new already
+ * gives are written (the Lune parity test checks the result matches the .rbxmx export).
+ */
+function uiNodeLines(t: UiTreeNode, parentRef: string, e: UiEmit) {
+  const { out } = e;
   const n = t.node;
   const r = resolveUiNode(n);
-  const ref = `N[${++counter.n}]`;
-  const props: string[] = [
-    `Name = ${luaString(r.name)}`,
-    `Position = ${udim2(r.pos)}`,
-    `Size = ${udim2(r.size)}`,
-    `AnchorPoint = Vector2.new(${luaNum(r.anchor[0])}, ${luaNum(r.anchor[1])})`,
-    `BackgroundColor3 = ${color3(r.bg)}`,
-    `BackgroundTransparency = ${luaNum(r.bgT, 3)}`,
-    `BorderSizePixel = 0`,
-    `ZIndex = ${r.z}`,
-    `LayoutOrder = ${r.order}`,
-    `Visible = ${r.visible}`,
-    `ClipsDescendants = ${r.clip}`,
-  ];
+  const ref = `N[${++e.n}]`;
+  const props: string[] = [`Name = ${luaString(r.name)}`, `Position = ${udim2(r.pos)}`, `Size = ${udim2(r.size)}`];
+  if (r.anchor[0] || r.anchor[1]) props.push(`AnchorPoint = V2(${luaNum(r.anchor[0])}, ${luaNum(r.anchor[1])})`);
+  props.push(`BackgroundColor3 = ${color3(r.bg)}`);
+  if (r.bgT) props.push(`BackgroundTransparency = ${luaNum(r.bgT, 3)}`);
+  props.push(`BorderSizePixel = 0`);
+  if (r.z !== 1) props.push(`ZIndex = ${r.z}`);
+  if (r.order) props.push(`LayoutOrder = ${r.order}`);
+  if (!r.visible) props.push(`Visible = false`);
+  if (r.clip !== (n.type === "ScrollingFrame")) props.push(`ClipsDescendants = ${r.clip}`);
   if (r.rotation) props.push(`Rotation = ${luaNum(r.rotation)}`);
   if (r.autoSize) props.push(`AutomaticSize = Enum.AutomaticSize.${AUTO[r.autoSize]}`);
   if (r.isText) {
-    props.push(
-      `Text = ${luaString(r.text)}`,
-      `TextColor3 = ${color3(r.textColor)}`,
-      `TextSize = ${luaNum(r.textSize)}`,
-      `FontFace = Font.new(${luaString(fontFamilyUrl(r.font))}, Enum.FontWeight.${FONT_WEIGHT_NAMES[FONTS[r.font].weight]}, Enum.FontStyle.${FONTS[r.font].style})`,
-      `TextScaled = ${r.textScaled}`,
-      `TextWrapped = ${r.textWrapped}`,
-      `TextXAlignment = Enum.TextXAlignment.${X_ALIGN[r.xAlign]}`,
-      `TextYAlignment = Enum.TextYAlignment.${Y_ALIGN[r.yAlign]}`,
-      `TextTransparency = ${luaNum(r.textT, 3)}`,
-      `RichText = ${r.rich}`,
-    );
+    props.push(`Text = ${luaString(r.text)}`, `TextColor3 = ${color3(r.textColor)}`, `TextSize = ${luaNum(r.textSize)}`, `FontFace = ${fontRef(r.font, e)}`);
+    if (r.textScaled) props.push(`TextScaled = true`);
+    if (r.textWrapped) props.push(`TextWrapped = true`);
+    if (r.xAlign !== "center") props.push(`TextXAlignment = Enum.TextXAlignment.${X_ALIGN[r.xAlign]}`);
+    if (r.yAlign !== "center") props.push(`TextYAlignment = Enum.TextYAlignment.${Y_ALIGN[r.yAlign]}`);
+    if (r.textT) props.push(`TextTransparency = ${luaNum(r.textT, 3)}`);
+    if (r.rich) props.push(`RichText = true`);
     if (n.truncate) props.push(`TextTruncate = Enum.TextTruncate.AtEnd`);
     if (n.textStroke) {
       props.push(
@@ -322,9 +360,9 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
   }
   if (r.isImage) {
     props.push(`Image = ${luaString(n.image ?? "")}`);
-    props.push(`ImageColor3 = ${color3(n.imageColor ?? "#ffffff")}`);
-    props.push(`ImageTransparency = ${luaNum(n.imageT ?? 0, 3)}`);
-    props.push(`ScaleType = Enum.ScaleType.${n.scaleType ?? "Stretch"}`);
+    if (n.imageColor && n.imageColor.toLowerCase() !== "#ffffff") props.push(`ImageColor3 = ${color3(n.imageColor)}`);
+    if (n.imageT) props.push(`ImageTransparency = ${luaNum(n.imageT, 3)}`);
+    if (n.scaleType && n.scaleType !== "Stretch") props.push(`ScaleType = Enum.ScaleType.${n.scaleType}`);
     if (n.slice) props.push(`SliceCenter = Rect.new(${n.slice.map((v) => luaNum(v)).join(", ")})`);
   }
   if (n.type === "ScrollingFrame") {
@@ -336,17 +374,21 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
   out.push(`\t${ref} = new(${luaString(n.type)}, ${parentRef}, { ${props.join(", ")} })`);
 
   const corner = cornerOf(n);
-  if (corner) out.push(`\tnew("UICorner", ${ref}, { CornerRadius = UDim.new(${luaNum(corner[0])}, ${luaNum(corner[1])}) })`);
+  if (corner) out.push(`\tnew("UICorner", ${ref}, { CornerRadius = ${udim(corner[0], corner[1])} })`);
   if (n.stroke) {
-    out.push(
-      `\tnew("UIStroke", ${ref}, { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Color = ${color3(n.stroke.color ?? "#000000")}, Thickness = ${luaNum(n.stroke.thickness ?? 1)}, Transparency = ${luaNum(n.stroke.transparency ?? 0, 3)} })`,
-    );
+    const sp = [`ApplyStrokeMode = Enum.ApplyStrokeMode.Border`];
+    const color = (n.stroke.color ?? "#000000").toLowerCase();
+    if (color !== "#000000") sp.push(`Color = ${color3(color)}`);
+    if ((n.stroke.thickness ?? 1) !== 1) sp.push(`Thickness = ${luaNum(n.stroke.thickness ?? 1)}`);
+    if (n.stroke.transparency) sp.push(`Transparency = ${luaNum(n.stroke.transparency, 3)}`);
+    out.push(`\tnew("UIStroke", ${ref}, { ${sp.join(", ")} })`);
   }
   if (n.gradient) {
     const g = n.gradient;
     const stops = gradientStops(g);
     const kps = stops.map((st) => `ColorSequenceKeypoint.new(${luaNum(st.t)}, ${color3(st.color)})`);
-    const gp = [`Color = ColorSequence.new({ ${kps.join(", ")} })`, `Rotation = ${luaNum(g.rotation ?? 0)}`];
+    const gp = [`Color = ColorSequence.new({ ${kps.join(", ")} })`];
+    if (g.rotation) gp.push(`Rotation = ${luaNum(g.rotation)}`);
     if (g.transparency) {
       const tk = stops.map((st) => `NumberSequenceKeypoint.new(${luaNum(st.t)}, ${luaNum(st.transparency, 3)})`);
       gp.push(`Transparency = NumberSequence.new({ ${tk.join(", ")} })`);
@@ -355,52 +397,47 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
   }
   const pad = paddingOf(n);
   if (pad) {
-    out.push(
-      `\tnew("UIPadding", ${ref}, { PaddingTop = UDim.new(0, ${luaNum(pad[0])}), PaddingRight = UDim.new(0, ${luaNum(pad[1])}), PaddingBottom = UDim.new(0, ${luaNum(pad[2])}), PaddingLeft = UDim.new(0, ${luaNum(pad[3])}) })`,
-    );
+    const names = ["PaddingTop", "PaddingRight", "PaddingBottom", "PaddingLeft"];
+    const pp = pad.map((v, i) => (v ? `${names[i]} = ${udim(0, v)}` : "")).filter(Boolean);
+    if (pp.length) out.push(`\tnew("UIPadding", ${ref}, { ${pp.join(", ")} })`);
   }
   if (n.layout) {
     const l = n.layout;
-    const h = { left: "Left", center: "Center", right: "Right" }[l.hAlign ?? "left"];
-    const v = { top: "Top", center: "Center", bottom: "Bottom" }[l.vAlign ?? "top"];
+    const hAlign = l.hAlign ?? "left";
+    const vAlign = l.vAlign ?? "top";
+    const align: string[] = [];
+    if (hAlign !== "left") align.push(`HorizontalAlignment = Enum.HorizontalAlignment.${X_ALIGN[hAlign]}`);
+    if (vAlign !== "top") align.push(`VerticalAlignment = Enum.VerticalAlignment.${Y_ALIGN[vAlign]}`);
     if (l.type === "list") {
-      const lp = [
-        `FillDirection = Enum.FillDirection.${l.dir === "horizontal" ? "Horizontal" : "Vertical"}`,
-        `Padding = UDim.new(0, ${luaNum(l.gap ?? 0)})`,
-        `HorizontalAlignment = Enum.HorizontalAlignment.${h}`,
-        `VerticalAlignment = Enum.VerticalAlignment.${v}`,
-        `SortOrder = Enum.SortOrder.LayoutOrder`,
-      ];
+      const lp: string[] = [];
+      if (l.dir === "horizontal") lp.push(`FillDirection = Enum.FillDirection.Horizontal`);
+      if (l.gap) lp.push(`Padding = ${udim(0, l.gap)}`);
+      lp.push(...align, `SortOrder = Enum.SortOrder.LayoutOrder`);
       if (l.wraps) lp.push(`Wraps = true`);
       out.push(`\tnew("UIListLayout", ${ref}, { ${lp.join(", ")} })`);
     } else {
-      const cell = l.cell ?? [0, 100, 0, 100];
       const gap = l.cellGap ?? [5, 5];
-      const gp = [
-        `CellSize = ${udim2(cell)}`,
-        `CellPadding = UDim2.new(0, ${luaNum(gap[0])}, 0, ${luaNum(gap[1])})`,
-        `FillDirection = Enum.FillDirection.${l.dir === "vertical" ? "Vertical" : "Horizontal"}`,
-        `HorizontalAlignment = Enum.HorizontalAlignment.${h}`,
-        `VerticalAlignment = Enum.VerticalAlignment.${v}`,
-        `SortOrder = Enum.SortOrder.LayoutOrder`,
-      ];
+      const gp = [`CellSize = ${udim2(l.cell ?? [0, 100, 0, 100])}`];
+      if (gap[0] !== 5 || gap[1] !== 5) gp.push(`CellPadding = U2(0, ${luaNum(gap[0])}, 0, ${luaNum(gap[1])})`);
+      if (l.dir === "vertical") gp.push(`FillDirection = Enum.FillDirection.Vertical`);
+      gp.push(...align, `SortOrder = Enum.SortOrder.LayoutOrder`);
       if (l.maxCells) gp.push(`FillDirectionMaxCells = ${l.maxCells}`);
       out.push(`\tnew("UIGridLayout", ${ref}, { ${gp.join(", ")} })`);
     }
   }
   if (n.aspect) out.push(`\tnew("UIAspectRatioConstraint", ${ref}, { AspectRatio = ${luaNum(n.aspect)} })`);
-  for (const c of t.children) uiNodeLines(c, ref, out, counter);
+  for (const c of t.children) uiNodeLines(c, ref, e);
 }
 
 export function uiToLuau(spec: UiSpec, opts: ImportOptions = {}): LuauResult {
-  const out: string[] = [];
-  const counter = { n: 0 };
+  const e: UiEmit = { out: [], n: 0, fonts: [] };
   const rootRef = spec.autoScale ? "scaleRoot" : "gui";
-  for (const root of buildUiTree(spec)) uiNodeLines(root, rootRef, out, counter);
+  for (const root of buildUiTree(spec)) uiNodeLines(root, rootRef, e);
+  const out = e.out;
   const autoScale = spec.autoScale
     ? `
 	-- Proportional scaling from the design resolution (see AutoScaleController).
-	local scaleRoot = new("Frame", gui, { Name = ${luaString(AUTO_SCALE_ROOT)}, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0 })
+	local scaleRoot = new("Frame", gui, { Name = ${luaString(AUTO_SCALE_ROOT)}, AnchorPoint = V2(0.5, 0.5), Position = U2(0.5, 0, 0.5, 0), Size = U2(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0 })
 	new("UIScale", scaleRoot, { Name = "AutoScale", Scale = 1 })
 	local controller = Instance.new("LocalScript")
 	controller.Name = "AutoScaleController"
@@ -428,6 +465,8 @@ local ok, result = pcall(function()
 		object.Parent = parentInstance
 		return object
 	end
+	local U2, C3, V2, UD = UDim2.new, Color3.fromRGB, Vector2.new, UDim.new
+	local F = { ${e.fonts.join(", ")} }
 	local N = {}${autoScale}
 ${out.join("\n")}
 

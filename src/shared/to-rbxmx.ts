@@ -226,19 +226,16 @@ const AUTO = { x: AUTOMATIC_SIZE_ENUM.X, y: AUTOMATIC_SIZE_ENUM.Y, xy: AUTOMATIC
 function writeUiNode(w: Writer, t: UiTreeNode) {
   const n = t.node;
   const r = resolveUiNode(n);
-  const props: Prop[] = [
-    str("Name", r.name),
-    udim2("Position", r.pos),
-    udim2("Size", r.size),
-    vec2("AnchorPoint", r.anchor),
-    color3("BackgroundColor3", r.bg),
-    float("BackgroundTransparency", r.bgT),
-    int("BorderSizePixel", 0),
-    int("ZIndex", r.z),
-    int("LayoutOrder", r.order),
-    bool("Visible", r.visible),
-    bool("ClipsDescendants", r.clip),
-  ];
+  // Same rule as the Luau converter: only values that differ from the class defaults.
+  const props: Prop[] = [str("Name", r.name), udim2("Position", r.pos), udim2("Size", r.size)];
+  if (r.anchor[0] || r.anchor[1]) props.push(vec2("AnchorPoint", r.anchor));
+  props.push(color3("BackgroundColor3", r.bg));
+  if (r.bgT) props.push(float("BackgroundTransparency", r.bgT));
+  props.push(int("BorderSizePixel", 0));
+  if (r.z !== 1) props.push(int("ZIndex", r.z));
+  if (r.order) props.push(int("LayoutOrder", r.order));
+  if (!r.visible) props.push(bool("Visible", false));
+  if (r.clip !== (n.type === "ScrollingFrame")) props.push(bool("ClipsDescendants", r.clip));
   if (r.rotation) props.push(float("Rotation", r.rotation));
   if (r.autoSize) props.push(token("AutomaticSize", AUTO[r.autoSize]));
   if (r.isText) {
@@ -247,13 +244,13 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
       color3("TextColor3", r.textColor),
       float("TextSize", r.textSize),
       `<Font name="FontFace"><Family><url>${fontFamilyUrl(r.font)}</url></Family><Weight>${FONTS[r.font].weight}</Weight><Style>${FONTS[r.font].style}</Style></Font>`,
-      bool("TextScaled", r.textScaled),
-      bool("TextWrapped", r.textWrapped),
-      token("TextXAlignment", X_ALIGN[r.xAlign]),
-      token("TextYAlignment", Y_ALIGN[r.yAlign]),
-      float("TextTransparency", r.textT),
-      bool("RichText", r.rich),
     );
+    if (r.textScaled) props.push(bool("TextScaled", true));
+    if (r.textWrapped) props.push(bool("TextWrapped", true));
+    if (r.xAlign !== "center") props.push(token("TextXAlignment", X_ALIGN[r.xAlign]));
+    if (r.yAlign !== "center") props.push(token("TextYAlignment", Y_ALIGN[r.yAlign]));
+    if (r.textT) props.push(float("TextTransparency", r.textT));
+    if (r.rich) props.push(bool("RichText", true));
     if (n.truncate) props.push(token("TextTruncate", 1));
     if (n.textStroke) {
       props.push(color3("TextStrokeColor3", n.textStroke.color ?? "#000000"), float("TextStrokeTransparency", n.textStroke.transparency ?? 0));
@@ -265,12 +262,10 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
     }
   }
   if (r.isImage) {
-    props.push(
-      `<Content name="Image"><url>${esc(n.image ?? "")}</url></Content>`,
-      color3("ImageColor3", n.imageColor ?? "#ffffff"),
-      float("ImageTransparency", n.imageT ?? 0),
-      token("ScaleType", SCALE_TYPE_ENUM[n.scaleType ?? "Stretch"]),
-    );
+    props.push(`<Content name="Image"><url>${esc(n.image ?? "")}</url></Content>`);
+    if (n.imageColor && n.imageColor.toLowerCase() !== "#ffffff") props.push(color3("ImageColor3", n.imageColor));
+    if (n.imageT) props.push(float("ImageTransparency", n.imageT));
+    if (n.scaleType && n.scaleType !== "Stretch") props.push(token("ScaleType", SCALE_TYPE_ENUM[n.scaleType]));
     if (n.slice) {
       const [x0, y0, x1, y1] = n.slice;
       props.push(`<Rect2D name="SliceCenter"><min><X>${num(x0)}</X><Y>${num(y0)}</Y></min><max><X>${num(x1)}</X><Y>${num(y1)}</Y></max></Rect2D>`);
@@ -289,13 +284,12 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
   const corner = cornerOf(n);
   if (corner) w.leaf("UICorner", [str("Name", "UICorner"), udim("CornerRadius", corner[0], corner[1])]);
   if (n.stroke) {
-    w.leaf("UIStroke", [
-      str("Name", "UIStroke"),
-      token("ApplyStrokeMode", APPLY_STROKE_MODE_BORDER),
-      color3("Color", n.stroke.color ?? "#000000"),
-      float("Thickness", n.stroke.thickness ?? 1),
-      float("Transparency", n.stroke.transparency ?? 0),
-    ]);
+    const sp: Prop[] = [str("Name", "UIStroke"), token("ApplyStrokeMode", APPLY_STROKE_MODE_BORDER)];
+    const strokeColor = (n.stroke.color ?? "#000000").toLowerCase();
+    if (strokeColor !== "#000000") sp.push(color3("Color", strokeColor));
+    if ((n.stroke.thickness ?? 1) !== 1) sp.push(float("Thickness", n.stroke.thickness ?? 1));
+    if (n.stroke.transparency) sp.push(float("Transparency", n.stroke.transparency));
+    w.leaf("UIStroke", sp);
   }
   if (n.gradient) {
     const g = n.gradient;
@@ -306,7 +300,8 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
         return `${num(st.t)} ${cr} ${cg} ${cb} 0 `;
       })
       .join("");
-    const gp: Prop[] = [str("Name", "UIGradient"), `<ColorSequence name="Color">${cs}</ColorSequence>`, float("Rotation", g.rotation ?? 0)];
+    const gp: Prop[] = [str("Name", "UIGradient"), `<ColorSequence name="Color">${cs}</ColorSequence>`];
+    if (g.rotation) gp.push(float("Rotation", g.rotation));
     if (g.transparency) {
       const ns = stops.map((st) => `${num(st.t)} ${num(st.transparency)} 0 `).join("");
       gp.push(`<NumberSequence name="Transparency">${ns}</NumberSequence>`);
@@ -315,40 +310,28 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
   }
   const pad = paddingOf(n);
   if (pad) {
-    w.leaf("UIPadding", [
-      str("Name", "UIPadding"),
-      udim("PaddingTop", 0, pad[0]),
-      udim("PaddingRight", 0, pad[1]),
-      udim("PaddingBottom", 0, pad[2]),
-      udim("PaddingLeft", 0, pad[3]),
-    ]);
+    const names = ["PaddingTop", "PaddingRight", "PaddingBottom", "PaddingLeft"];
+    const pp = pad.map((v, i) => (v ? udim(names[i], 0, v) : "")).filter(Boolean);
+    if (pp.length) w.leaf("UIPadding", [str("Name", "UIPadding"), ...pp]);
   }
   if (n.layout) {
     const l = n.layout;
-    const h = H_ALIGN[l.hAlign ?? "left"];
-    const v = V_ALIGN[l.vAlign ?? "top"];
+    const align: Prop[] = [];
+    if ((l.hAlign ?? "left") !== "left") align.push(token("HorizontalAlignment", H_ALIGN[l.hAlign!]));
+    if ((l.vAlign ?? "top") !== "top") align.push(token("VerticalAlignment", V_ALIGN[l.vAlign!]));
     if (l.type === "list") {
-      const lp: Prop[] = [
-        str("Name", "UIListLayout"),
-        token("FillDirection", l.dir === "horizontal" ? FILL_DIRECTION_ENUM.Horizontal : FILL_DIRECTION_ENUM.Vertical),
-        udim("Padding", 0, l.gap ?? 0),
-        token("HorizontalAlignment", h),
-        token("VerticalAlignment", v),
-        token("SortOrder", SORT_ORDER_LAYOUT_ORDER),
-      ];
+      const lp: Prop[] = [str("Name", "UIListLayout")];
+      if (l.dir === "horizontal") lp.push(token("FillDirection", FILL_DIRECTION_ENUM.Horizontal));
+      if (l.gap) lp.push(udim("Padding", 0, l.gap));
+      lp.push(...align, token("SortOrder", SORT_ORDER_LAYOUT_ORDER));
       if (l.wraps) lp.push(bool("Wraps", true));
       w.leaf("UIListLayout", lp);
     } else {
       const gap = l.cellGap ?? [5, 5];
-      const gp: Prop[] = [
-        str("Name", "UIGridLayout"),
-        udim2("CellSize", l.cell ?? [0, 100, 0, 100]),
-        udim2("CellPadding", [0, gap[0], 0, gap[1]]),
-        token("FillDirection", l.dir === "vertical" ? FILL_DIRECTION_ENUM.Vertical : FILL_DIRECTION_ENUM.Horizontal),
-        token("HorizontalAlignment", h),
-        token("VerticalAlignment", v),
-        token("SortOrder", SORT_ORDER_LAYOUT_ORDER),
-      ];
+      const gp: Prop[] = [str("Name", "UIGridLayout"), udim2("CellSize", l.cell ?? [0, 100, 0, 100])];
+      if (gap[0] !== 5 || gap[1] !== 5) gp.push(udim2("CellPadding", [0, gap[0], 0, gap[1]]));
+      if (l.dir === "vertical") gp.push(token("FillDirection", FILL_DIRECTION_ENUM.Vertical));
+      gp.push(...align, token("SortOrder", SORT_ORDER_LAYOUT_ORDER));
       if (l.maxCells) gp.push(int("FillDirectionMaxCells", l.maxCells));
       w.leaf("UIGridLayout", gp);
     }

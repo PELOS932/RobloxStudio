@@ -101,6 +101,37 @@ export const UiSpecSchema = z.object({
 export type UiNode = z.infer<typeof UiNodeSchema>;
 export type UiSpec = z.infer<typeof UiSpecSchema>;
 
+// Shorthand accepted from Claude: named styles shared by nodes (fewer output tokens).
+export const UiNodeInputSchema = UiNodeSchema.extend({
+  style: z.string().optional().describe("inherit fields from styles[style]; fields set on the node win"),
+});
+export const UiStylesSchema = z
+  .record(z.string(), UiNodeSchema.omit({ name: true, parent: true }).partial())
+  .optional()
+  .describe('named node presets reused via node.style, e.g. {"card":{"bg":"#1e2230","corner":12,"stroke":{"color":"#2c3246"}}}');
+export const UiSpecInputSchema = UiSpecSchema.extend({
+  styles: UiStylesSchema,
+  nodes: z.array(UiNodeInputSchema).min(1).max(3000).describe("flat list; children reference parent by name; list order = sibling order"),
+});
+export type UiNodeInput = z.infer<typeof UiNodeInputSchema>;
+export type UiSpecInput = z.infer<typeof UiSpecInputSchema>;
+export type UiStyles = UiSpecInput["styles"];
+
+export function expandUiNodes(nodes: UiNodeInput[], styles: UiStyles = {}): UiNode[] {
+  return nodes.map(({ style, ...own }) => {
+    if (!style) return own as UiNode;
+    const base = styles?.[style];
+    if (!base) throw new Error(`Unknown style "${style}" (define it in styles).`);
+    const merged = { ...base } as Record<string, unknown>;
+    for (const [k, v] of Object.entries(own)) if (v !== undefined) merged[k] = v;
+    return merged as UiNode;
+  });
+}
+
+export function expandUiInput({ styles, nodes, ...rest }: UiSpecInput): UiSpec {
+  return { ...rest, nodes: expandUiNodes(nodes, styles) };
+}
+
 export interface UiTreeNode {
   node: UiNode;
   children: UiTreeNode[];

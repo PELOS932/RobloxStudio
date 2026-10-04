@@ -12,19 +12,26 @@ import { importAsset, pullSelection } from "./importer.ts";
 import { resultText, type StudioBridge, type ToolCallResult } from "./studio-bridge.ts";
 import { MCP_TOKEN } from "./config.ts";
 import {
-  applyModelEdit, ModelEditSchema, ModelSpecSchema, sanitizeModelSpec, toNativeModel,
+  applyModelEdit, expandModelInput, expandParts, ModelEditSchema, ModelSpecInputSchema, PartInputSchema, sanitizeModelSpec, toNativeModel,
 } from "../shared/model.ts";
-import { applyUiEdit, sanitizeUiSpec, UiEditSchema, UiSpecSchema, type UiSpec } from "../shared/ui.ts";
+import {
+  applyUiEdit, expandUiInput, expandUiNodes, sanitizeUiSpec, UiEditSchema, UiNodeInputSchema, UiSpecInputSchema, UiStylesSchema, type UiSpec,
+} from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
 import { sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
 
+type JsonSchema = Record<string, any>;
+
 interface ToolDef {
   name: string;
   description: string;
+  /** Strict schema: every call is validated against it. */
   schema: z.ZodObject;
+  /** Optional rewrite of the schema shown to Claude (to keep the cached tool list small). */
+  advertise?: (s: JsonSchema) => JsonSchema;
   run: (args: any, ctx: Ctx) => Promise<ToolResult>;
 }
 
@@ -41,9 +48,44 @@ export interface ForgeDeps {
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
 const MAX_TEXT = 20_000;
 
-function jsonSchema(schema: z.ZodObject) {
-  const s = z.toJSONSchema(schema, { target: "draft-7", io: "input", unrepresentable: "any" }) as Record<string, unknown>;
+function jsonSchema(schema: z.ZodObject): JsonSchema {
+  const s = z.toJSONSchema(schema, { target: "draft-7", io: "input", unrepresentable: "any" }) as JsonSchema;
   delete s.$schema;
+  return slim(s) as JsonSchema;
+}
+
+const SAFE_INT = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Drop schema noise that costs prompt tokens without helping Claude: safe-integer bounds,
+ * string length limits, regex patterns and huge array limits. Validation still uses the
+ * strict zod schemas, so nothing is loosened at runtime.
+ */
+function slim(node: unknown, isPropertyMap = false): unknown {
+  if (Array.isArray(node)) return node.map((n) => slim(n));
+  if (!node || typeof node !== "object") return node;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (!isPropertyMap) {
+      if ((k === "minimum" || k === "maximum") && typeof v === "number" && Math.abs(v) >= SAFE_INT) continue;
+      if (k === "pattern" || k === "maxLength" || k === "minLength") continue;
+      if (k === "maxItems" && typeof v === "number" && v >= 50) continue;
+      if (k === "minItems" && v === 1 && !("maxItems" in node && (node as JsonSchema).maxItems < 50)) continue;
+    }
+    out[k] = slim(v, !isPropertyMap && k === "properties");
+  }
+  return out;
+}
+
+/** Replace the item schema of array properties with a one-line reference to another tool's format. */
+function looseItems(s: JsonSchema, props: Record<string, string>): JsonSchema {
+  for (const [key, description] of Object.entries(props)) {
+    const p = s.properties?.[key];
+    if (!p) continue;
+    s.properties[key] = p.type === "array"
+      ? { type: "array", items: { type: "object" }, description }
+      : { type: "object", additionalProperties: { type: "object" }, description };
+  }
   return s;
 }
 
@@ -66,9 +108,22 @@ export class ForgeMcp {
   private pending = new Map<string, { request: PermissionRequest; resolve: (allow: boolean) => void }>();
   private alwaysAllow = new Set<string>();
   private tools: ToolDef[];
+  private byName: Map<string, ToolDef>;
+  /** tools/list result, built once: the list is static (it is part of Claude's cached prompt). */
+  private listed: { name: string; description: string; inputSchema: any }[];
 
   constructor(private deps: ForgeDeps) {
     this.tools = this.defineTools();
+    this.byName = new Map(this.tools.map((t) => [t.name, t]));
+    this.listed = this.tools.map((t) => {
+      const schema = jsonSchema(t.schema);
+      return { name: t.name, description: t.description, inputSchema: t.advertise ? t.advertise(schema) : schema };
+    });
+  }
+
+  /** The advertised tool list (also used by tests and benchmarks). */
+  get toolList() {
+    return this.listed;
   }
 
   get pendingPermissions(): PermissionRequest[] {
@@ -110,11 +165,9 @@ export class ForgeMcp {
     }
     const ctx: Ctx = { convId: String(req.params.convId ?? "") };
     const server = new Server({ name: "forge", version: "0.1.0" }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: this.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: jsonSchema(t.schema) as any })),
-    }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: this.listed }));
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const tool = this.tools.find((t) => t.name === request.params.name);
+      const tool = this.byName.get(request.params.name);
       if (!tool) return text(`Unknown tool ${request.params.name}`, true);
       const parsed = tool.schema.safeParse(request.params.arguments ?? {});
       if (!parsed.success) return text(`Invalid arguments: ${z.prettifyError(parsed.error)}`, true);
@@ -181,21 +234,32 @@ export class ForgeMcp {
     return [
       {
         name: "create_model",
-        description: "Create (or fully replace, with id) a 3D model made of Roblox parts. Prefer edit_model for changes.",
-        schema: ModelSpecSchema.extend({ id: id.optional().describe("replace this existing model") }),
+        description:
+          "Create (or fully replace, with id) a 3D model made of Roblox parts. Prefer edit_model for changes. Save tokens with styles (shared color/material/size), repeat (rows of copies), copies (same part at offsets) and clones (copy a whole group).",
+        schema: ModelSpecInputSchema.extend({ id: id.optional().describe("replace this existing model") }),
+        advertise: (s) => looseItems(s, { styles: 'name → part fields to share (any part field except name/pos), e.g. {"log":{"color":"#6b4a2b","material":"Wood"}}' }),
         run: async ({ id: replaceId, ...spec }) => {
-          const asset = this.save("model", sanitizeModelSpec(spec), replaceId);
+          const asset = this.save("model", sanitizeModelSpec(expandModelInput(spec)), replaceId);
           return this.afterSave(asset, replaceId ? "Replaced" : "Created");
         },
       },
       {
         name: "edit_model",
         description: "Change an existing model: add parts, update parts by name (partial fields), remove by name, move or scale everything.",
-        schema: ModelEditSchema.extend({ id }),
-        run: async ({ id: assetId, ...edit }) => {
+        schema: ModelEditSchema.extend({
+          id,
+          add: z.array(PartInputSchema).optional(),
+          styles: ModelSpecInputSchema.shape.styles,
+        }),
+        advertise: (s) => looseItems(s, {
+          add: "new parts: same fields as create_model parts (style/repeat/copies allowed)",
+          update: "partial updates matched by name: {name, ...any create_model part fields}; only listed fields change",
+          styles: "styles for the added parts, as in create_model",
+        }),
+        run: async ({ id: assetId, styles, add, ...edit }) => {
           const prev = assets.get(assetId);
           if (!prev || prev.kind !== "model") return text(`No model with id ${assetId}.`, true);
-          const { spec, missing } = applyModelEdit(prev.spec, edit);
+          const { spec, missing } = applyModelEdit(prev.spec, { ...edit, add: add ? expandParts(add, styles) : undefined });
           const asset = this.save("model", spec, assetId);
           return this.afterSave(asset, "Edited", missing.length ? [`not found: ${missing.join(", ")}`] : []);
         },
@@ -203,9 +267,10 @@ export class ForgeMcp {
       {
         name: "create_ui",
         description: "Create (or fully replace, with id) a ScreenGui from a flat list of Roblox GUI nodes. Prefer edit_ui for changes.",
-        schema: UiSpecSchema.extend({ id: id.optional().describe("replace this existing UI") }),
+        schema: UiSpecInputSchema.extend({ id: id.optional().describe("replace this existing UI") }),
+        advertise: (s) => looseItems(s, { styles: 'name → node fields to share (any node field except name/parent), e.g. {"card":{"bg":"#1e2230","corner":12}}' }),
         run: async ({ id: replaceId, ...raw }) => {
-          const { spec, warnings } = sanitizeUiSpec(raw);
+          const { spec, warnings } = sanitizeUiSpec(expandUiInput(raw));
           const asset = this.save("ui", spec, replaceId);
           return this.afterSave(asset, replaceId ? "Replaced" : "Created", warnings);
         },
@@ -213,11 +278,16 @@ export class ForgeMcp {
       {
         name: "edit_ui",
         description: "Change an existing UI: add nodes, update nodes by name (partial fields), remove nodes (with descendants).",
-        schema: UiEditSchema.extend({ id }),
-        run: async ({ id: assetId, ...edit }) => {
+        schema: UiEditSchema.extend({ id, add: z.array(UiNodeInputSchema).optional(), styles: UiStylesSchema }),
+        advertise: (s) => looseItems(s, {
+          add: "new nodes (appended; set parent): same fields as create_ui nodes (style allowed)",
+          update: "partial updates matched by name: {name, ...any create_ui node fields}; only listed fields change",
+          styles: "styles for the added nodes, as in create_ui",
+        }),
+        run: async ({ id: assetId, styles, add, ...edit }) => {
           const prev = assets.get(assetId);
           if (!prev || prev.kind !== "ui") return text(`No UI with id ${assetId}.`, true);
-          const { spec, missing, warnings } = applyUiEdit(prev.spec, edit);
+          const { spec, missing, warnings } = applyUiEdit(prev.spec, { ...edit, add: add ? expandUiNodes(add, styles) : undefined });
           if (prev.html) warnings.push("this UI came from HTML; edit_ui_html keeps the HTML source in sync (spec-only edits are lost if the HTML is re-translated)");
           const asset = this.save("ui", spec, assetId);
           return this.afterSave(asset, "Edited", [...(missing.length ? [`not found: ${missing.join(", ")}`] : []), ...warnings]);

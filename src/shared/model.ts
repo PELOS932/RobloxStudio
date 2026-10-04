@@ -44,6 +44,83 @@ export type PartSpec = z.infer<typeof PartSchema>;
 export type ModelSpec = z.infer<typeof ModelSpecSchema>;
 export type LightSpec = z.infer<typeof LightSchema>;
 
+// ---------------------------------------------------------------------------
+// Shorthand accepted from Claude (fewer output tokens): named styles, repeated
+// parts and cloned groups. Expanded server-side into plain parts before saving.
+
+const offsets = z.array(vec3("offset [x,y,z]")).min(1).max(200);
+
+export const PartInputSchema = PartSchema.extend({
+  size: vec3("[x,y,z] studs (may come from the style)").optional(),
+  style: z.string().optional().describe("inherit fields from styles[style]; fields set on the part win"),
+  repeat: z
+    .object({ count: z.number().int().min(2).max(200), step: vec3("offset between copies [x,y,z]") })
+    .optional()
+    .describe("count copies in a row, each offset by step; names get 1..n"),
+  copies: offsets.optional().describe("extra copies at these offsets from pos; names get 1..n"),
+});
+
+export const ModelSpecInputSchema = ModelSpecSchema.extend({
+  styles: z
+    .record(z.string(), PartSchema.omit({ name: true, pos: true }).partial())
+    .optional()
+    .describe('named part presets reused via part.style, e.g. {"log":{"color":"#6b4a2b","material":"Wood"}}'),
+  parts: z.array(PartInputSchema).min(1).max(3000),
+  clones: z
+    .array(z.object({ group: z.string().describe("group to copy, with its subgroups"), offsets }))
+    .optional()
+    .describe("copy a whole group to each offset; copies are named group2, group3…"),
+});
+
+export type PartInput = z.infer<typeof PartInputSchema>;
+export type ModelSpecInput = z.infer<typeof ModelSpecInputSchema>;
+export type PartStyles = ModelSpecInput["styles"];
+
+const addVec = (a: number[], b: number[]) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+
+/** Expand styles/repeat/copies into plain parts. */
+export function expandParts(parts: PartInput[], styles: PartStyles = {}): PartSpec[] {
+  const out: PartSpec[] = [];
+  for (const raw of parts) {
+    const { style, repeat, copies, ...own } = raw;
+    const base = style ? styles?.[style] : undefined;
+    if (style && !base) throw new Error(`Unknown style "${style}" (define it in styles).`);
+    const merged = { ...base } as Record<string, unknown>;
+    for (const [k, v] of Object.entries(own)) if (v !== undefined) merged[k] = v;
+    const part = merged as PartSpec;
+    if (!part.size) throw new Error(`Part "${own.name ?? "unnamed"}" has no size (set size, or a style with a size).`);
+    const at: number[][] = [];
+    for (const o of [[0, 0, 0], ...(copies ?? [])]) {
+      for (let i = 0; i < (repeat?.count ?? 1); i++) at.push(addVec(o, (repeat?.step ?? [0, 0, 0]).map((v) => v * i)));
+    }
+    if (at.length === 1) {
+      out.push(part);
+      continue;
+    }
+    at.forEach((o, i) => out.push({ ...part, name: part.name ? `${part.name}${i + 1}` : undefined, pos: addVec(part.pos, o) }));
+  }
+  return out;
+}
+
+/** Turn shorthand input into a plain ModelSpec (what is stored, previewed and converted). */
+export function expandModelInput(input: ModelSpecInput): ModelSpec {
+  const parts = expandParts(input.parts, input.styles);
+  for (const c of input.clones ?? []) {
+    const group = c.group.split("/").map((s) => s.trim()).filter(Boolean).join("/");
+    const inside = (g?: string) => !!g && (g === group || g.startsWith(group + "/"));
+    const source = parts.filter((p) => inside(p.group));
+    if (!source.length) throw new Error(`clones: no parts in group "${c.group}".`);
+    c.offsets.forEach((o, i) => {
+      const n = i + 2;
+      for (const p of source) {
+        parts.push({ ...p, name: p.name ? `${p.name}${n}` : undefined, group: `${group}${n}${p.group!.slice(group.length)}`, pos: addVec(p.pos, o) });
+      }
+    });
+  }
+  if (parts.length > 3000) throw new Error(`The model expands to ${parts.length} parts; the limit is 3000.`);
+  return { name: input.name, ...(input.description ? { description: input.description } : {}), parts };
+}
+
 export interface NativeLight {
   className: "PointLight" | "SpotLight" | "SurfaceLight";
   color: RGB;
