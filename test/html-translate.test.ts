@@ -46,7 +46,8 @@ describe.skipIf(!CHROME)("HTML → Roblox UI translation (browser)", () => {
     fetch(BASE + path, { method: body ? "POST" : "GET", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 
   beforeAll(async () => {
-    execFileSync(process.execPath, [join(ROOT, "node_modules/vite/bin/vite.js"), "build", "--logLevel", "error"], { cwd: ROOT });
+    // vitest sets NODE_ENV=test, which would make this a React development bundle in dist/.
+    execFileSync(process.execPath, [join(ROOT, "node_modules/vite/bin/vite.js"), "build", "--logLevel", "error"], { cwd: ROOT, env: { ...process.env, NODE_ENV: "production" } });
     const data = mkdtempSync(join(tmpdir(), "forge-html-"));
     writeFileSync(join(data, "settings.json"), JSON.stringify({ claudePath: join(ROOT, "test/fake-claude.mjs"), studio: { command: "", args: [], autoConnect: false } }));
     server = spawn(process.execPath, ["--import", "tsx", join(ROOT, "src/server/index.ts")], {

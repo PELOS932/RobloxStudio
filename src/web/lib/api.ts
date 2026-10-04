@@ -23,6 +23,8 @@ export class Socket {
   onConnection: (up: boolean) => void = () => {};
 
   connect() {
+    // Safe to call twice (React StrictMode runs effects twice in development).
+    if (this.ws && this.ws.readyState <= WebSocket.OPEN) return;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     this.ws = ws;
@@ -38,6 +40,7 @@ export class Socket {
       }
     };
     ws.onclose = () => {
+      if (this.ws !== ws) return;
       this.onConnection(false);
       if (this.closed) return;
       const delay = Math.min(8000, 400 * 2 ** this.retry++);

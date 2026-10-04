@@ -63,6 +63,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   blocks: Block[];
   createdAt: number;
+  /** Model that produced an assistant message. */
+  model?: string;
   usage?: TurnUsage;
   error?: string;
   interrupted?: boolean;

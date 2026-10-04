@@ -37,7 +37,7 @@ interface State {
   sidebarOpen: boolean;
   settingsOpen: false | "general" | "account" | "studio" | "import" | "advanced";
   htmlImportOpen: boolean;
-  composerInsert: { text: string; nonce: number } | null;
+  composerInsert: { text: string; nonce: number; replace?: boolean } | null;
   importing: Record<string, boolean>;
 }
 
@@ -237,6 +237,12 @@ export async function newConversation(): Promise<string> {
 /** Show an empty composer; the conversation is created on the first message. */
 export function startNewChat() {
   set({ activeConvId: null, mobileView: "chat" });
+}
+
+export async function renameConversation(id: string, title: string) {
+  const t = title.trim();
+  if (!t) return;
+  await api(`/conversations/${id}`, { method: "PATCH", body: { title: t } }).catch((e) => toast(String(e), "error"));
 }
 
 export async function deleteConversation(id: string) {
