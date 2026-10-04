@@ -28,6 +28,7 @@ if mode == "luau" then
 		UDim = roblox.UDim,
 		UDim2 = roblox.UDim2,
 		Rect = roblox.Rect,
+		Font = roblox.Font,
 		Enum = roblox.Enum,
 		ColorSequence = roblox.ColorSequence,
 		ColorSequenceKeypoint = roblox.ColorSequenceKeypoint,

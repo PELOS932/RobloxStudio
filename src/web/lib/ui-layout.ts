@@ -32,7 +32,9 @@ export const LINE_HEIGHT = 1.2;
 let measureCtx: CanvasRenderingContext2D | null = null;
 export function fontCss(r: ResolvedUiNode, size: number): string {
   const f = FONTS[r.font] ?? FONTS.GothamMedium;
-  return `${f.style === "Italic" ? "italic " : ""}${f.weight} ${size}px "${f.web}", system-ui, sans-serif`;
+  // Some Roblox fonts are single-weight but visually heavy (FredokaOne ≈ Fredoka SemiBold).
+  const weight = "webWeight" in f ? f.webWeight : f.weight;
+  return `${f.style === "Italic" ? "italic " : ""}${weight} ${size}px "${f.web}", system-ui, sans-serif`;
 }
 
 export function stripRich(text: string): string {
@@ -279,8 +281,23 @@ function layoutChildren(parent: UiTreeNode, area: { w: number; h: number }): Lai
   });
 }
 
-export function layoutScreen(spec: UiSpec, width: number, height: number, inset: number): { roots: LaidOut[]; top: number } {
+export interface ScreenLayout {
+  roots: LaidOut[];
+  top: number;
+  /** UIScale applied by the auto-scale root (1 when not used). */
+  scale: number;
+  /** Box the roots are laid out in, before scaling (auto-scale root is 1/scale of the screen). */
+  root: Box;
+}
+
+export function layoutScreen(spec: UiSpec, width: number, height: number, inset: number): ScreenLayout {
   const top = spec.ignoreInset ? 0 : inset;
+  const W = width, H = height - top;
   const root: UiTreeNode = { node: { name: "__screen", type: "Frame" }, children: buildUiTree(spec) };
-  return { roots: layoutChildren(root, { w: width, h: height - top }), top };
+  if (!spec.autoScale) return { roots: layoutChildren(root, { w: W, h: H }), top, scale: 1, root: { x: 0, y: top, w: W, h: H } };
+  // Same math as the generated AutoScaleController LocalScript.
+  const a = spec.autoScale;
+  const scale = Math.min(a.max ?? 1.5, Math.max(a.min ?? 0.35, Math.min(W / a.width, H / a.height)));
+  const rw = W / scale, rh = H / scale;
+  return { roots: layoutChildren(root, { w: rw, h: rh }), top, scale, root: { x: (W - rw) / 2, y: top + (H - rh) / 2, w: rw, h: rh } };
 }

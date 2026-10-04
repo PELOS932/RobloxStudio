@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { cornerOf, type UiSpec } from "../../shared/ui.ts";
+import { cornerOf, gradientStops, type UiSpec } from "../../shared/ui.ts";
 import { FONTS, TOPBAR_INSET } from "../../shared/roblox-data.ts";
 import { hexToRgb } from "../../shared/math.ts";
 import { fontCss, layoutScreen, LINE_HEIGHT, type LaidOut } from "../lib/ui-layout.ts";
@@ -164,24 +164,13 @@ interface ViewProps {
 function gradientCss(lo: LaidOut, base: string, baseAlpha: number): string | null {
   const g = lo.node.gradient;
   if (!g) return null;
+  // UIGradient multiplies the node's own color.
   const [br, bg, bb] = hexToRgb(base);
-  const colors = g.colors.map(hexToRgb);
-  const tr = g.transparency ?? [0, 0];
-  const sample = (arr: number[] | [number, number, number][], t: number) => {
-    const pos = t * (arr.length - 1);
-    const i = Math.min(arr.length - 2, Math.floor(pos));
-    const f = pos - i;
-    const a = arr[i], b = arr[i + 1];
-    if (typeof a === "number") return (a as number) + ((b as number) - (a as number)) * f;
-    return (a as number[]).map((v, k) => v + ((b as number[])[k] - v) * f);
-  };
-  const stops: string[] = [];
-  for (let s = 0; s <= 8; s++) {
-    const t = s / 8;
-    const c = sample(colors, t) as number[];
-    const alpha = baseAlpha * (1 - (sample(tr, t) as number));
-    stops.push(`rgba(${Math.round((c[0] * br) / 255)}, ${Math.round((c[1] * bg) / 255)}, ${Math.round((c[2] * bb) / 255)}, ${alpha}) ${t * 100}%`);
-  }
+  const stops = gradientStops(g).map((st) => {
+    const [r, gg, b] = hexToRgb(st.color);
+    const alpha = baseAlpha * (1 - st.transparency);
+    return `rgba(${Math.round((r * br) / 255)}, ${Math.round((gg * bg) / 255)}, ${Math.round((b * bb) / 255)}, ${alpha}) ${+(st.t * 100).toFixed(2)}%`;
+  });
   return `linear-gradient(${90 + (g.rotation ?? 0)}deg, ${stops.join(", ")})`;
 }
 
@@ -308,9 +297,11 @@ function NodeView({ lo, hover, selected, setHover, setSelected }: ViewProps) {
             WebkitBackgroundClip: textGradient ? "text" : undefined,
             backgroundClip: textGradient ? "text" : undefined,
             textAlign: r.xAlign,
-            whiteSpace: wrap ? "pre-wrap" : "pre",
+            whiteSpace: node.truncate ? "nowrap" : wrap ? "pre-wrap" : "pre",
             overflowWrap: wrap ? "break-word" : undefined,
-            width: wrap ? "100%" : "max-content",
+            overflow: node.truncate ? "hidden" : undefined,
+            textOverflow: node.truncate ? "ellipsis" : undefined,
+            width: wrap || node.truncate ? "100%" : "max-content",
             textShadow: stroke,
           }}
         >
@@ -355,18 +346,65 @@ function findNode(list: LaidOut[], name: string): LaidOut | null {
 
 // --------------------------------------------------------------- component
 
+type Device = { key: string; label: string; w: number; h: number };
+type Bg = "scene" | "dark" | "checker";
+
+function devicesFor(spec: UiSpec): Device[] {
+  const list: Device[] = (Object.keys(DEVICES) as DeviceKey[]).map((k) => ({ key: k, ...DEVICES[k] }));
+  if (spec.autoScale) list.unshift({ key: "design", label: "Design", w: spec.autoScale.width, h: spec.autoScale.height });
+  return list;
+}
+
+/** The Roblox screen itself (top bar + GUI), unscaled. */
+export function UiScreen({ spec, w, h, bg, hover = null, selected = null, setHover = () => {}, setSelected = () => {} }: {
+  spec: UiSpec;
+  w: number;
+  h: number;
+  bg: Bg;
+  hover?: string | null;
+  selected?: string | null;
+  setHover?: (n: string | null) => void;
+  setSelected?: (n: string | null) => void;
+}) {
+  const [fontTick, setFontTick] = useState(0);
+  useWebFonts(spec, () => setFontTick((t) => t + 1));
+  const layout = useMemo(() => layoutScreen(spec, w, h, TOPBAR_INSET), [spec, w, h, fontTick]);
+  return (
+    <div className={`ui-screen bg-${bg}`} style={{ width: w, height: h }} data-forge-screen>
+      {!spec.ignoreInset && (
+        <div className="ui-topbar" style={{ height: TOPBAR_INSET }}>
+          <span />
+          <span />
+        </div>
+      )}
+      <div
+        style={{
+          position: "absolute",
+          left: layout.root.x,
+          top: layout.root.y,
+          width: layout.root.w,
+          height: layout.root.h,
+          transform: layout.scale !== 1 ? `scale(${layout.scale})` : undefined,
+          transformOrigin: "center center",
+        }}
+      >
+        {layout.roots.map((lo, i) => (
+          <NodeView key={`${lo.node.name}-${i}`} lo={lo} hover={hover} selected={selected} setHover={setHover} setSelected={setSelected} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function UiPreview({ spec, onReference }: { spec: UiSpec; onReference?: (name: string) => void }) {
-  const [device, setDevice] = useState<DeviceKey>(() => (localStorageGet("forge.device") as DeviceKey) || "laptop");
-  const [bg, setBg] = useState<"scene" | "dark" | "checker">("scene");
+  const devices = useMemo(() => devicesFor(spec), [spec]);
+  const [deviceKey, setDeviceKey] = useState<string>(() => (spec.autoScale ? "design" : localStorageGet("forge.device") || "laptop"));
+  const [bg, setBg] = useState<Bg>("scene");
   const [scale, setScale] = useState(1);
   const [hover, setHover] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [fontTick, setFontTick] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
-  const dev = DEVICES[device] ?? DEVICES.laptop;
-
-  useWebFonts(spec, () => setFontTick((t) => t + 1));
-  const layout = useMemo(() => layoutScreen(spec, dev.w, dev.h, TOPBAR_INSET), [spec, dev, fontTick]);
+  const dev = devices.find((d) => d.key === deviceKey) ?? devices.find((d) => d.key === "laptop")!;
 
   useLayoutEffect(() => {
     const el = stageRef.current;
@@ -380,27 +418,28 @@ export function UiPreview({ spec, onReference }: { spec: UiSpec; onReference?: (
     ro.observe(el);
     fit();
     return () => ro.disconnect();
-  }, [dev]);
+  }, [dev.w, dev.h]);
 
   useEffect(() => setSelected(null), [spec.name]);
+  const layout = useMemo(() => layoutScreen(spec, dev.w, dev.h, TOPBAR_INSET), [spec, dev.w, dev.h]);
   const sel = selected ? findNode(layout.roots, selected) : null;
 
   return (
     <div className="ui-stage" ref={stageRef} onMouseLeave={() => setHover(null)} onClick={() => setSelected(null)}>
       <div className="ui-toolbar">
         <div className="seg">
-          {(Object.keys(DEVICES) as DeviceKey[]).map((k) => (
+          {devices.map((d) => (
             <button
-              key={k}
-              className={device === k ? "active" : ""}
+              key={d.key}
+              className={dev.key === d.key ? "active" : ""}
               onClick={(e) => {
                 e.stopPropagation();
-                setDevice(k);
-                localStorageSet("forge.device", k);
+                setDeviceKey(d.key);
+                if (d.key !== "design") localStorageSet("forge.device", d.key);
               }}
-              title={`${DEVICES[k].w}×${DEVICES[k].h}`}
+              title={`${d.w}×${d.h}`}
             >
-              {DEVICES[k].label}
+              {d.label}
             </button>
           ))}
         </div>
@@ -413,18 +452,8 @@ export function UiPreview({ spec, onReference }: { spec: UiSpec; onReference?: (
         </div>
       </div>
       <div style={{ width: dev.w * scale, height: dev.h * scale, marginTop: 30 }}>
-        <div className={`ui-screen bg-${bg}`} style={{ width: dev.w, height: dev.h, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-          {!spec.ignoreInset && (
-            <div className="ui-topbar" style={{ height: TOPBAR_INSET }}>
-              <span />
-              <span />
-            </div>
-          )}
-          <div style={{ position: "absolute", left: 0, top: layout.top, width: dev.w, height: dev.h - layout.top }}>
-            {layout.roots.map((lo, i) => (
-              <NodeView key={`${lo.node.name}-${i}`} lo={lo} hover={hover} selected={selected} setHover={setHover} setSelected={setSelected} />
-            ))}
-          </div>
+        <div style={{ transform: `scale(${scale})`, transformOrigin: "top left", width: dev.w, height: dev.h }}>
+          <UiScreen spec={spec} w={dev.w} h={dev.h} bg={bg} hover={hover} selected={selected} setHover={setHover} setSelected={setSelected} />
         </div>
       </div>
       {sel && (

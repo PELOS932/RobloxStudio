@@ -14,10 +14,10 @@ import { MCP_TOKEN } from "./config.ts";
 import {
   applyModelEdit, ModelEditSchema, ModelSpecSchema, sanitizeModelSpec, toNativeModel,
 } from "../shared/model.ts";
-import { applyUiEdit, sanitizeUiSpec, UiEditSchema, UiSpecSchema } from "../shared/ui.ts";
+import { applyUiEdit, sanitizeUiSpec, UiEditSchema, UiSpecSchema, type UiSpec } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
-import { sizeLabel, summarize, type Asset } from "../shared/assets.ts";
-import type { ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
+import { sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
+import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
 
@@ -35,6 +35,7 @@ interface Ctx {
 export interface ForgeDeps {
   bridge: StudioBridge;
   getSettings: () => Settings;
+  convertHtml: (request: HtmlConvertRequest) => Promise<{ spec: UiSpec; warnings: string[] }>;
 }
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
@@ -144,7 +145,7 @@ export class ForgeMcp {
     return text(lines.join("\n"));
   }
 
-  private save<K extends Asset["kind"]>(kind: K, spec: Extract<Asset, { kind: K }>["spec"], replaceId?: string): Asset {
+  private save<K extends Asset["kind"]>(kind: K, spec: Extract<Asset, { kind: K }>["spec"], replaceId?: string, html?: HtmlSource | null): Asset {
     const now = Date.now();
     const prev = replaceId ? assets.get(replaceId) : undefined;
     if (replaceId && (!prev || prev.kind !== kind)) throw new Error(`No ${kind} asset with id ${replaceId}.`);
@@ -160,6 +161,10 @@ export class ForgeMcp {
       origin: "claude",
       lastImport: prev?.lastImport,
     } as Asset;
+    if (asset.kind === "ui") {
+      const keep = html === undefined && prev?.kind === "ui" ? prev.html : html ?? undefined;
+      if (keep) asset.html = keep;
+    }
     return assets.put(asset, true);
   }
 
@@ -213,8 +218,56 @@ export class ForgeMcp {
           const prev = assets.get(assetId);
           if (!prev || prev.kind !== "ui") return text(`No UI with id ${assetId}.`, true);
           const { spec, missing, warnings } = applyUiEdit(prev.spec, edit);
+          if (prev.html) warnings.push("this UI came from HTML; edit_ui_html keeps the HTML source in sync (spec-only edits are lost if the HTML is re-translated)");
           const asset = this.save("ui", spec, assetId);
           return this.afterSave(asset, "Edited", [...(missing.length ? [`not found: ${missing.join(", ")}`] : []), ...warnings]);
+        },
+      },
+      {
+        name: "create_ui_html",
+        description:
+          "Design a ScreenGui in HTML/CSS. The page is rendered at width×height and every element is translated to Roblox GUI objects at the same positions (frames, text, rich text, buttons, text boxes, rbxassetid images, gradients, corners, strokes, shadows, scrolling lists). Best for rich, polished UIs.",
+        schema: z.object({
+          name: z.string().min(1).max(60).describe("ScreenGui name"),
+          html: z.string().min(1).max(300_000).describe("complete HTML document or body fragment with inline <style>; no JavaScript"),
+          width: z.number().int().min(320).max(3840).optional().describe("design width px, default 1280"),
+          height: z.number().int().min(240).max(2160).optional().describe("design height px, default 720"),
+          autoScale: z.boolean().optional().describe("scale proportionally on other screens, default true"),
+          id: id.optional().describe("replace this existing UI"),
+        }),
+        run: async ({ name, html, width, height, autoScale, id: replaceId }) => {
+          const source: HtmlSource = { source: html, width: width ?? 1280, height: height ?? 720, autoScale: autoScale ?? true };
+          const { spec, warnings } = await this.deps.convertHtml({ name, html, width: source.width, height: source.height, autoScale: source.autoScale });
+          const asset = this.save("ui", spec, replaceId, source);
+          return this.afterSave(asset, replaceId ? "Replaced (from HTML)" : "Created (from HTML)", warnings);
+        },
+      },
+      {
+        name: "edit_ui_html",
+        description: "Edit the HTML source of a UI made with create_ui_html using exact find/replace edits, then re-translate it. Cheaper than re-sending the whole page.",
+        schema: z.object({
+          id,
+          edits: z
+            .array(z.object({ find: z.string().min(1), replace: z.string(), all: z.boolean().optional().describe("replace every occurrence") }))
+            .min(1)
+            .max(50),
+          width: z.number().int().min(320).max(3840).optional(),
+          height: z.number().int().min(240).max(2160).optional(),
+        }),
+        run: async ({ id: assetId, edits, width, height }) => {
+          const prev = assets.get(assetId);
+          if (!prev || prev.kind !== "ui" || !prev.html) return text(`No HTML-based UI with id ${assetId} (use create_ui_html first).`, true);
+          let source = prev.html.source;
+          for (const e of edits) {
+            const count = source.split(e.find).length - 1;
+            if (count === 0) return text(`Edit not applied: "${e.find.slice(0, 80)}" was not found. No changes were saved.`, true);
+            if (count > 1 && !e.all) return text(`Edit not applied: "${e.find.slice(0, 80)}" occurs ${count} times; add more context or set all: true. No changes were saved.`, true);
+            source = e.all ? source.split(e.find).join(e.replace) : source.replace(e.find, () => e.replace);
+          }
+          const html: HtmlSource = { ...prev.html, source, width: width ?? prev.html.width, height: height ?? prev.html.height };
+          const { spec, warnings } = await this.deps.convertHtml({ name: prev.spec.name, html: source, width: html.width, height: html.height, autoScale: html.autoScale });
+          const asset = this.save("ui", spec, assetId, html);
+          return this.afterSave(asset, "Edited (from HTML)", warnings);
         },
       },
       {

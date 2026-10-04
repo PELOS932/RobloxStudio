@@ -34,6 +34,7 @@ await client.connect(new StreamableHTTPClientTransport(new URL(mcp.url), { reque
 const sessionId = arg("--resume") ?? randomUUID();
 const out = (o) => process.stdout.write(JSON.stringify({ ...o, session_id: sessionId }) + "\n");
 let initSent = false;
+let lastAssetId = "";
 let apiCount = 0;
 
 function streamText(text) {
@@ -80,6 +81,21 @@ for await (const line of createInterface({ input: process.stdin })) {
     out({ type: "system", subtype: "init", model: arg("--model"), tools: [], mcp_servers: [{ name: "forge", status: "connected" }] });
   }
   const started = Date.now();
+  if (/html hud/i.test(prompt)) {
+    const html = readFileSync(new URL("./html/hud.html", import.meta.url), "utf8");
+    streamText("Designing the HUD in HTML.");
+    const res = await toolCall("create_ui_html", { name: "Hud", html });
+    lastAssetId = res.content[0].text.match(/\b(u_[a-z0-9]{6})\b/)?.[1] ?? lastAssetId;
+    streamText("The HUD is ready.");
+    out({ type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, duration_ms: 1, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 1, cache_creation_input_tokens: 0 } });
+    continue;
+  }
+  if (/edit html/i.test(prompt)) {
+    await toolCall("edit_ui_html", { id: lastAssetId, edits: [{ find: "Level 12 reached!", replace: "Level 13 reached!" }] });
+    streamText("Updated.");
+    out({ type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, duration_ms: 1, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 1, cache_creation_input_tokens: 0 } });
+    continue;
+  }
   const example = /cabin/i.test(prompt) ? ["create_model", "cozy-cabin.model.json"] : /shop/i.test(prompt) ? ["create_ui", "item-shop.ui.json"] : null;
   if (example) {
     const spec = JSON.parse(readFileSync(new URL(`../examples/${example[1]}`, import.meta.url), "utf8")).spec;

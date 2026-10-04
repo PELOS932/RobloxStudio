@@ -9,9 +9,12 @@ import { hexToRgb } from "./math.ts";
 import {
   AUTOMATIC_SIZE_ENUM, FILL_DIRECTION_ENUM, FONTS, HORIZONTAL_ALIGN_ENUM, MATERIAL_ENUM,
   NORMAL_ID_ENUM, PART_TYPE_ENUM, SCALE_TYPE_ENUM, SORT_ORDER_LAYOUT_ORDER, TEXT_X_ALIGN_ENUM,
-  TEXT_Y_ALIGN_ENUM, VERTICAL_ALIGN_ENUM, ZINDEX_BEHAVIOR_SIBLING, APPLY_STROKE_MODE_BORDER,
+  TEXT_Y_ALIGN_ENUM, VERTICAL_ALIGN_ENUM, ZINDEX_BEHAVIOR_SIBLING, APPLY_STROKE_MODE_BORDER, fontFamilyUrl,
 } from "./roblox-data.ts";
-import { buildUiTree, cornerOf, paddingOf, resolveUiNode, type UiSpec, type UiTreeNode } from "./ui.ts";
+import {
+  AUTO_SCALE_ROOT, autoScaleSource, buildUiTree, cornerOf, gradientStops, paddingOf, resolveUiNode,
+  type UiSpec, type UiTreeNode,
+} from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
 import type { ImportOptions } from "./to-luau.ts";
 
@@ -190,9 +193,28 @@ export function uiToRbxmx(spec: UiSpec, opts: ImportOptions = {}): string {
     int("DisplayOrder", spec.displayOrder ?? 0),
     ...forgeAttrs(opts),
   ]);
+  if (spec.autoScale) {
+    w.open("Frame", [
+      str("Name", AUTO_SCALE_ROOT),
+      vec2("AnchorPoint", [0.5, 0.5]),
+      udim2("Position", [0.5, 0, 0.5, 0]),
+      udim2("Size", [1, 0, 1, 0]),
+      float("BackgroundTransparency", 1),
+      int("BorderSizePixel", 0),
+    ]);
+    w.leaf("UIScale", [str("Name", "AutoScale"), float("Scale", 1)]);
+  }
   for (const t of buildUiTree(spec)) writeUiNode(w, t);
+  if (spec.autoScale) {
+    w.close();
+    w.leaf("LocalScript", [str("Name", "AutoScaleController"), protectedString("Source", autoScaleSource(spec.autoScale))]);
+  }
   w.close();
   return w.toString();
+}
+
+function protectedString(name: string, source: string): Prop {
+  return `<ProtectedString name="${name}"><![CDATA[${source.replace(/]]>/g, "]]]]><![CDATA[>")}]]></ProtectedString>`;
 }
 
 const X_ALIGN = { left: TEXT_X_ALIGN_ENUM.Left, center: TEXT_X_ALIGN_ENUM.Center, right: TEXT_X_ALIGN_ENUM.Right };
@@ -224,7 +246,7 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
       str("Text", r.text),
       color3("TextColor3", r.textColor),
       float("TextSize", r.textSize),
-      token("Font", FONTS[r.font].value),
+      `<Font name="FontFace"><Family><url>${fontFamilyUrl(r.font)}</url></Family><Weight>${FONTS[r.font].weight}</Weight><Style>${FONTS[r.font].style}</Style></Font>`,
       bool("TextScaled", r.textScaled),
       bool("TextWrapped", r.textWrapped),
       token("TextXAlignment", X_ALIGN[r.xAlign]),
@@ -232,6 +254,7 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
       float("TextTransparency", r.textT),
       bool("RichText", r.rich),
     );
+    if (n.truncate) props.push(token("TextTruncate", 1));
     if (n.textStroke) {
       props.push(color3("TextStrokeColor3", n.textStroke.color ?? "#000000"), float("TextStrokeTransparency", n.textStroke.transparency ?? 0));
     }
@@ -276,15 +299,16 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
   }
   if (n.gradient) {
     const g = n.gradient;
-    const cs = g.colors
-      .map((c, i) => {
-        const [cr, cg, cb] = hexToRgb(c).map((v) => v / 255);
-        return `${num(i / (g.colors.length - 1))} ${cr} ${cg} ${cb} 0 `;
+    const stops = gradientStops(g);
+    const cs = stops
+      .map((st) => {
+        const [cr, cg, cb] = hexToRgb(st.color).map((v) => v / 255);
+        return `${num(st.t)} ${cr} ${cg} ${cb} 0 `;
       })
       .join("");
     const gp: Prop[] = [str("Name", "UIGradient"), `<ColorSequence name="Color">${cs}</ColorSequence>`, float("Rotation", g.rotation ?? 0)];
     if (g.transparency) {
-      const ns = g.transparency.map((v, i) => `${num(i / (g.transparency!.length - 1))} ${num(v)} 0 `).join("");
+      const ns = stops.map((st) => `${num(st.t)} ${num(st.transparency)} 0 `).join("");
       gp.push(`<NumberSequence name="Transparency">${ns}</NumberSequence>`);
     }
     w.leaf("UIGradient", gp);
@@ -338,7 +362,6 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
 
 export function scriptToRbxmx(spec: ScriptSpec, opts: ImportOptions = {}): string {
   const w = new Writer();
-  const cdata = "<![CDATA[" + spec.source.replace(/]]>/g, "]]]]><![CDATA[>") + "]]>";
-  w.leaf(spec.kind, [str("Name", spec.name), `<ProtectedString name="Source">${cdata}</ProtectedString>`, ...forgeAttrs(opts)]);
+  w.leaf(spec.kind, [str("Name", spec.name), protectedString("Source", spec.source), ...forgeAttrs(opts)]);
   return w.toString();
 }

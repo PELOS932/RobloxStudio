@@ -7,8 +7,9 @@ import { luaLongString, luaNum, luaString } from "./luau.ts";
 import { toNativeModel, type ModelSpec, type NativePart } from "./model.ts";
 import { optimizeParts, type OptimizeStats } from "./optimize.ts";
 import { hexToRgb } from "./math.ts";
+import { FONTS, FONT_WEIGHT_NAMES, fontFamilyUrl } from "./roblox-data.ts";
 import {
-  buildUiTree, cornerOf, paddingOf, resolveUiNode,
+  AUTO_SCALE_ROOT, autoScaleSource, buildUiTree, cornerOf, gradientStops, paddingOf, resolveUiNode,
   type UiSpec, type UiTreeNode,
 } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
@@ -298,7 +299,7 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
       `Text = ${luaString(r.text)}`,
       `TextColor3 = ${color3(r.textColor)}`,
       `TextSize = ${luaNum(r.textSize)}`,
-      `Font = Enum.Font.${r.font}`,
+      `FontFace = Font.new(${luaString(fontFamilyUrl(r.font))}, Enum.FontWeight.${FONT_WEIGHT_NAMES[FONTS[r.font].weight]}, Enum.FontStyle.${FONTS[r.font].style})`,
       `TextScaled = ${r.textScaled}`,
       `TextWrapped = ${r.textWrapped}`,
       `TextXAlignment = Enum.TextXAlignment.${X_ALIGN[r.xAlign]}`,
@@ -306,6 +307,7 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
       `TextTransparency = ${luaNum(r.textT, 3)}`,
       `RichText = ${r.rich}`,
     );
+    if (n.truncate) props.push(`TextTruncate = Enum.TextTruncate.AtEnd`);
     if (n.textStroke) {
       props.push(
         `TextStrokeColor3 = ${color3(n.textStroke.color ?? "#000000")}`,
@@ -342,10 +344,11 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
   }
   if (n.gradient) {
     const g = n.gradient;
-    const kps = g.colors.map((c, i) => `ColorSequenceKeypoint.new(${luaNum(i / (g.colors.length - 1))}, ${color3(c)})`);
+    const stops = gradientStops(g);
+    const kps = stops.map((st) => `ColorSequenceKeypoint.new(${luaNum(st.t)}, ${color3(st.color)})`);
     const gp = [`Color = ColorSequence.new({ ${kps.join(", ")} })`, `Rotation = ${luaNum(g.rotation ?? 0)}`];
     if (g.transparency) {
-      const tk = g.transparency.map((v, i) => `NumberSequenceKeypoint.new(${luaNum(i / (g.transparency!.length - 1))}, ${luaNum(v, 3)})`);
+      const tk = stops.map((st) => `NumberSequenceKeypoint.new(${luaNum(st.t)}, ${luaNum(st.transparency, 3)})`);
       gp.push(`Transparency = NumberSequence.new({ ${tk.join(", ")} })`);
     }
     out.push(`\tnew("UIGradient", ${ref}, { ${gp.join(", ")} })`);
@@ -392,7 +395,18 @@ function uiNodeLines(t: UiTreeNode, parentRef: string, out: string[], counter: {
 export function uiToLuau(spec: UiSpec, opts: ImportOptions = {}): LuauResult {
   const out: string[] = [];
   const counter = { n: 0 };
-  for (const root of buildUiTree(spec)) uiNodeLines(root, "gui", out, counter);
+  const rootRef = spec.autoScale ? "scaleRoot" : "gui";
+  for (const root of buildUiTree(spec)) uiNodeLines(root, rootRef, out, counter);
+  const autoScale = spec.autoScale
+    ? `
+	-- Proportional scaling from the design resolution (see AutoScaleController).
+	local scaleRoot = new("Frame", gui, { Name = ${luaString(AUTO_SCALE_ROOT)}, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0), Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0 })
+	new("UIScale", scaleRoot, { Name = "AutoScale", Scale = 1 })
+	local controller = Instance.new("LocalScript")
+	controller.Name = "AutoScaleController"
+	controller.Source = ${luaLongString(autoScaleSource(spec.autoScale))}
+	controller.Parent = gui`
+    : "";
   const code = `${header("UI", spec.name, ` · ${spec.nodes.length} elements`, opts, `Forge: import ${spec.name}`)}
 local PARENT_PATH = ${luaString(opts.parent ?? "StarterGui")}
 local REPLACE = ${opts.replace ?? true}
@@ -414,7 +428,7 @@ local ok, result = pcall(function()
 		object.Parent = parentInstance
 		return object
 	end
-	local N = {}
+	local N = {}${autoScale}
 ${out.join("\n")}
 
 	local previous = if REPLACE then forgeFindPrevious(parent, FORGE_ASSET_ID) else nil

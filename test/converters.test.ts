@@ -11,7 +11,7 @@ import { modelToRbxmx, scriptToRbxmx, uiToRbxmx } from "../src/shared/to-rbxmx.t
 import { eulerXYZDeg, matToEulerXYZDeg } from "../src/shared/math.ts";
 import { luaLongString } from "../src/shared/luau.ts";
 import { pullSelectionLuau } from "../src/shared/studio-luau.ts";
-import { doorScript, lanternModel, shopUi, wallModel } from "./fixtures.ts";
+import { doorScript, lanternModel, scaledHud, shopUi, wallModel } from "./fixtures.ts";
 
 const LUNE = process.env.LUNE_BIN ?? "lune";
 const harness = join(import.meta.dirname, "lune", "harness.luau");
@@ -155,6 +155,19 @@ describe.skipIf(!luneAvailable)("generated Luau matches exported .rbxmx (execute
     expect(a.dump).toBe(b.dump);
     expect(a.dump).toContain("UIGridLayout");
     expect(a.dump).toContain("GothamSSm");
+  });
+
+  it("auto-scaled ui with gradient stops and truncation", () => {
+    const spec = sanitizeUiSpec(scaledHud).spec;
+    const a = runLune("luau", uiToLuau(spec, opts).code, "StarterGui");
+    const b = runLune("rbxmx", uiToRbxmx(spec, opts), "StarterGui");
+    expect(a.result).toMatchObject({ ok: true, kind: "ui" });
+    expect(a.dump).toBe(b.dump);
+    expect(a.dump).toContain("ScreenGui:ScaledHud/Frame:AutoScaleRoot/Frame:Health");
+    expect(a.dump).toContain("UIScale:AutoScale");
+    expect(a.dump).toContain("LocalScript:AutoScaleController");
+    expect(a.dump).toContain('<token name="TextTruncate">1</token>');
+    expect(a.dump).toContain("0.7 0.9765"); // explicit stop at t=0.7 (#f97316)
   });
 
   it("script", () => {

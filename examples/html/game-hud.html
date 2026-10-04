@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Inter:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; font-family: Inter, sans-serif; background: #5b8f4e; }
+  .currency { position: absolute; top: 16px; right: 16px; display: flex; gap: 10px; }
+  .pill { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; background: rgba(10, 12, 20, .75); border-radius: 999px; color: #fff; font-weight: 800; font-size: 18px; }
+  .pill .icon { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .stats { position: absolute; left: 20px; bottom: 20px; width: 300px; padding: 14px; border-radius: 16px; background: rgba(10,12,20,.7); border: 1px solid rgba(255,255,255,.12); }
+  .stat { margin-bottom: 10px; }
+  .stat:last-child { margin-bottom: 0; }
+  .label { display: flex; justify-content: space-between; color: #cbd5e1; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 5px; }
+  .bar { height: 14px; border-radius: 8px; background: #1e2230; overflow: hidden; }
+  .fill { height: 100%; border-radius: 8px; }
+  .hotbar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+  .slot { width: 58px; height: 58px; border-radius: 12px; background: rgba(10,12,20,.7); border: 2px solid rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; font-size: 26px; position: relative; }
+  .slot.selected { border-color: #facc15; box-shadow: 0 0 0 3px rgba(250,204,21,.35); }
+  .slot .key { position: absolute; top: 3px; left: 6px; font-size: 10px; color: #94a3b8; font-weight: 700; }
+  .quest { position: absolute; top: 90px; right: 16px; width: 260px; padding: 12px 14px; border-radius: 14px; background: rgba(10,12,20,.65); color: #fff; }
+  .quest h3 { margin: 0 0 6px; font-family: 'Luckiest Guy', cursive; font-weight: 400; font-size: 20px; color: #facc15; letter-spacing: 1px; }
+  .quest li { font-size: 13px; color: #e2e8f0; margin: 4px 0; }
+  .quest li.done { color: #4ade80; text-decoration: line-through; }
+  .toast { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 12px; background: linear-gradient(90deg, #f59e0b, #ef4444); color: #fff; font-weight: 800; font-size: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+</style></head>
+<body>
+  <div class="toast" id="LevelUpToast">⭐ Level 12 reached!</div>
+  <div class="currency">
+    <div class="pill" id="Coins"><span class="icon" style="background:#f59e0b">🪙</span>48,210</div>
+    <div class="pill" id="Gems"><span class="icon" style="background:#8b5cf6">💎</span>1,337</div>
+  </div>
+  <div class="quest" id="QuestTracker">
+    <h3>Daily Quests</h3>
+    <ul style="margin:0;padding-left:18px">
+      <li class="done">Collect 50 coins</li>
+      <li>Defeat 3 slimes (1/3)</li>
+      <li>Visit the <b style="color:#38bdf8">Crystal Cave</b></li>
+    </ul>
+  </div>
+  <div class="stats" id="Stats">
+    <div class="stat"><div class="label"><span>Health</span><span>82 / 100</span></div><div class="bar"><div class="fill" style="width:82%;background:linear-gradient(90deg,#ef4444,#f97316)"></div></div></div>
+    <div class="stat"><div class="label"><span>Stamina</span><span>55%</span></div><div class="bar"><div class="fill" style="width:55%;background:linear-gradient(90deg,#3b82f6,#06b6d4)"></div></div></div>
+    <div class="stat"><div class="label"><span>XP</span><span>Lv 12</span></div><div class="bar"><div class="fill" style="width:30%;background:#a855f7"></div></div></div>
+  </div>
+  <div class="hotbar" id="Hotbar">
+    <div class="slot selected"><span class="key">1</span>⚔️</div>
+    <div class="slot"><span class="key">2</span>🏹</div>
+    <div class="slot"><span class="key">3</span>🧪</div>
+    <div class="slot"><span class="key">4</span>🍖</div>
+    <div class="slot"><span class="key">5</span></div>
+  </div>
+</body></html>

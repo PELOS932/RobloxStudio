@@ -9,6 +9,7 @@ import { ModelViewer } from "./ModelViewer.tsx";
 import { UiPreview } from "./UiPreview.tsx";
 import { ScriptView } from "./ScriptView.tsx";
 import { StudioPanel } from "./StudioPanel.tsx";
+import { HtmlSourceView, retranslate } from "./HtmlTools.tsx";
 
 export function RightPanel() {
   const tab = useStore((s) => s.rightTab);
@@ -43,6 +44,7 @@ function PreviewPane() {
   const summary = useStore((s) => s.assets.find((a) => a.id === s.activeAssetId));
   const cached = useStore((s) => (s.activeAssetId ? s.assetCache[s.activeAssetId] : undefined));
   const [shown, setShown] = useState<Asset | null>(null);
+  const [view, setView] = useState<"roblox" | "html">("roblox");
 
   useEffect(() => {
     if (!activeId) return setShown(null);
@@ -70,13 +72,27 @@ function PreviewPane() {
   const asset = shown.id === summary.id ? shown : null;
   const reference = (what: string) =>
     insertIntoComposer(`In ${summary.kind === "ui" ? "UI" : "model"} "${summary.name}" (${summary.id}), change ${summary.kind === "ui" ? "node" : "part"} "${what}": `);
+  const htmlAsset = asset?.kind === "ui" && asset.html ? asset : null;
 
   return (
     <>
       <AssetBar asset={summary} />
+      {htmlAsset && (
+        <div className="asset-subbar">
+          <div className="seg" style={{ background: "var(--panel-2)" }}>
+            <button className={view === "roblox" ? "active" : ""} onClick={() => setView("roblox")}>Roblox result</button>
+            <button className={view === "html" ? "active" : ""} onClick={() => setView("html")}>Original HTML</button>
+          </div>
+          <span className="muted hide-mobile">Translated from HTML at {htmlAsset.html!.width}×{htmlAsset.html!.height}</span>
+          <span style={{ flex: 1 }} />
+          <button className="btn small ghost" title="Run the translator again on the stored HTML" onClick={() => void retranslate(htmlAsset).catch((e) => toast(String(e), "error"))}>
+            <Icon name="refresh" size={13} /> Re-translate
+          </button>
+        </div>
+      )}
       <div className="stage">
         {asset?.kind === "model" && <ModelViewer spec={asset.spec} onReference={reference} />}
-        {asset?.kind === "ui" && <UiPreview spec={asset.spec} onReference={reference} />}
+        {asset?.kind === "ui" && (htmlAsset && view === "html" ? <HtmlSourceView asset={htmlAsset} /> : <UiPreview spec={asset.spec} onReference={reference} />)}
         {asset?.kind === "script" && <ScriptView source={asset.spec.source} />}
       </div>
     </>
@@ -117,6 +133,11 @@ function AssetBar({ asset }: { asset: AssetSummary }) {
       >
         <Icon name={importing ? "refresh" : "upload"} /> {importing ? "Importing…" : asset.lastImport ? "Update in Studio" : "Import to Studio"}
       </button>
+      {asset.kind === "ui" && (
+        <a className="btn" href={`/?render=${asset.id}`} target="_blank" rel="noreferrer" title="Open full size in a new tab">
+          <Icon name="eye" />
+        </a>
+      )}
       <div className="dropdown" ref={menuRef}>
         <button className="btn" onClick={() => setMenu((v) => !v)} title="Download">
           <Icon name="download" />
@@ -162,6 +183,9 @@ function AssetLibrary() {
             </button>
           ))}
         </div>
+        <button className="btn" onClick={() => useStore.setState({ htmlImportOpen: true })} title="Translate HTML/CSS into a Roblox UI">
+          <Icon name="code" /> HTML
+        </button>
         <button className="btn" onClick={() => setPasteOpen((v) => !v)} title="Add an asset from JSON">
           <Icon name="plus" /> JSON
         </button>
@@ -180,6 +204,7 @@ function AssetLibrary() {
                 {sizeLabel(a.kind, a.size)} · v{a.version} · {timeAgo(a.updatedAt)}
               </small>
             </div>
+            {a.fromHtml && <span className="badge">HTML</span>}
             {a.lastImport && <span className={`badge ${a.lastImport.version === a.version ? "ok" : ""}`}>{a.lastImport.version === a.version ? "In Studio" : "Studio outdated"}</span>}
             <button
               className="icon-btn"

@@ -12,12 +12,42 @@ A dark-themed chat app that runs **Claude Code in the background** and connects 
 
 - **Chat with Claude Code.** Claude Code runs as a background process with your own Claude account (Pro/Max subscription or API key). Responses stream in, tool calls show as cards, and each turn shows context size, prompt-cache hit rate and the API-equivalent cost.
 - **3D models.** Claude describes models as Roblox parts (blocks, balls, cylinders, wedges, 40+ materials, lights, sub-groups). The viewer renders them with Roblox-style materials, shadows, reflections and neon bloom. Click any part to inspect it or say "change this part".
-- **UIs that match Studio.** Claude builds ScreenGuis from a Roblox-native spec (UDim2, AnchorPoint, UICorner, UIStroke, UIGradient, UIPadding, list/grid layouts, AutomaticSize, ScrollingFrames, rich text). The browser preview re-implements Roblox's layout rules and has Desktop/Laptop/Tablet/Phone frames, so what you see is what Studio gets.
+- **HTML → Roblox UI translation.** Claude (or you) designs a UI in plain HTML/CSS. Studio Forge renders it in the browser at the design resolution and turns every element into a Roblox GuiObject at exactly the same position. Backgrounds, gradients, corners, borders, shadows, text, rich text, buttons, inputs, images, scrolling lists, `::before`/`::after` and list bullets all carry over. Elements stay anchored to their screen edge or centre, and the whole UI scales proportionally on phones, tablets and 4K. See [HTML → Roblox](#html--roblox-ui-translation).
+- **UIs that match Studio.** Claude can also build ScreenGuis from a compact Roblox-native spec (UDim2, AnchorPoint, UICorner, UIStroke, UIGradient, UIPadding, list/grid layouts, AutomaticSize, ScrollingFrames, rich text). The browser preview re-implements Roblox's layout rules and has Desktop/Laptop/Tablet/Phone frames, so what you see is what Studio gets.
 - **Scripts.** Script, LocalScript and ModuleScript assets are inserted at any path.
 - **One-click import (or auto-import).** Assets are converted to Luau deterministically and run through the Studio MCP. Imports are **undoable** (ChangeHistoryService). Re-importing **updates the previous copy in place**, keeping its position, and the new object is selected in Studio.
 - **Export and import.** Download any asset as `.rbxmx` (drag into Studio), `.luau` (paste into the command bar) or `.json`. Pull the current Studio selection (Parts/Models or GUIs) back into the app, let Claude improve it, then push it back.
 - **Studio tools for Claude.** Claude can run Luau, search the instance tree, inspect instances, read and edit scripts, take viewport screenshots it can see, play-test and read the Output window. Luau and script edits ask for your approval first (configurable).
 - **Faster games.** On import, touching identical blocks are merged (fewer parts, same look). Parts are anchored, CanTouch is turned off, and tiny or neon parts skip shadows.
+
+## HTML → Roblox UI translation
+
+![The same shop UI as HTML (left) and translated into Roblox GUI objects (right)](docs/html-translation.png)
+
+Ask Claude for a UI and it designs it in HTML/CSS (`create_ui_html`). You can also paste or open any `.html` file under **Assets → HTML**. The page is rendered by your browser at the design size (1280×720 by default) with scripts disabled. The translator then reads the browser's **computed** layout and styles, so flexbox, grid, margins, percentages and fonts are resolved exactly as the browser shows them.
+
+| HTML / CSS | Roblox |
+| --- | --- |
+| `div` with background / gradient | `Frame` + `UIGradient` (angle and color stops kept) |
+| `border-radius` | `UICorner` (pills and circles stay round when scaled) |
+| uniform `border`, `outline` | `UIStroke` (the frame is inset so the outer edge matches) |
+| single-side borders (`border-bottom`) | thin divider `Frame`s |
+| `box-shadow` | soft layered shadow frames that move with the element |
+| text (font, size, weight, color, alignment, `uppercase`, ellipsis, `text-shadow`) | `TextLabel` with matching `FontFace`, `TextTruncate` and `TextStroke` |
+| `<b>`, `<i>`, `<u>`, `<s>`, `<span style="color/font-size">` | RichText |
+| `<button>`, `<a href>`, `<select>` | `TextButton` |
+| `<input>`, `<textarea>` (placeholder) | `TextBox` |
+| `<img src="rbxassetid://…">`, `background: url(rbxassetid://…)` | `ImageLabel` (`object-fit` → `ScaleType`) |
+| `overflow: hidden` / `auto` | `ClipsDescendants` / `ScrollingFrame` with the right canvas |
+| `transform: rotate()`, `opacity` | `Rotation`, transparency |
+| `::before` / `::after`, list bullets, `<progress>`, checkboxes | real instances |
+| `id="BuyButton"` / `data-name` | the Instance name, so scripts can find it |
+
+**Works on every screen.** Elements touching an edge or centred on screen are anchored there (AnchorPoint + scale), full-width bars use scale sizes, and groups move together. The translated ScreenGui gets an `AutoScaleRoot` with a `UIScale` and a 15-line LocalScript that scales the design proportionally to the player's screen. The preview has a **Design** preset plus phone, tablet and desktop presets, and a **Roblox result / Original HTML** toggle for comparing them.
+
+**Not translated:** JavaScript, SVG, canvas, video, hover states and animations (the translation is a static snapshot), CSS filters and backdrop blur, and images that aren't Roblox assets. The page background is treated as the game world and isn't exported. Text is capped at 100px, Roblox's maximum. The translator tells you when it skips something.
+
+Example pages to try are in `examples/html/`.
 
 ## Designed to use fewer tokens
 
@@ -25,7 +55,7 @@ A dark-themed chat app that runs **Claude Code in the background** and connects 
 | --- | --- |
 | Compact JSON asset specs instead of Luau or HTML | Claude writes roughly 3–5× fewer output tokens per model or UI |
 | Deterministic conversion and import on the server | Converting and importing costs no tokens |
-| `edit_model` / `edit_ui` partial edits | Changing one part doesn't re-send the whole asset |
+| `edit_model` / `edit_ui` partial edits, `edit_ui_html` find/replace edits | Changing one part or one CSS rule doesn't re-send the whole asset |
 | Auto-import reports inside the create/edit result | No extra tool round-trip to import |
 | One long-lived Claude Code process per chat, static system prompt and tool list, `--exclude-dynamic-system-prompt-sections` | The prompt prefix stays byte-identical, so after the first turn prompt caching serves most input (91% of input tokens in a test run) |
 | Optional 1-hour prompt cache | Coming back from testing in Studio doesn't re-pay the whole context |
@@ -89,7 +119,7 @@ Browser (React + three.js)  ⇄  WebSocket/REST  ⇄  Studio Forge server (Node,
 
 - `src/shared`: asset specs (zod), converters (`to-luau.ts`, `to-rbxmx.ts`), the part-merging optimizer and the Luau that reads selections back out of Studio. Used by both server and browser, so previews and imports come from the same code.
 - `src/server`: Claude Code process manager (`claude.ts`), Forge MCP tools (`forge-mcp.ts`), Studio MCP client (`studio-bridge.ts`), storage and HTTP/WebSocket.
-- `src/web`: the UI, including the 3D viewer (`ModelViewer.tsx` and `lib/materials.ts`) and the Roblox layout engine for UI previews (`lib/ui-layout.ts`).
+- `src/web`: the UI, including the 3D viewer (`ModelViewer.tsx` and `lib/materials.ts`), the Roblox layout engine for UI previews (`lib/ui-layout.ts`) and the HTML translator (`lib/html-to-ui.ts`). Translation needs a real browser layout engine, so when Claude calls `create_ui_html` the server asks your open Studio Forge tab to do it.
 - Your chats, assets and settings are stored in `data/` (gitignored).
 
 ### Asset formats (what Claude writes)
@@ -107,7 +137,7 @@ Browser (React + three.js)  ⇄  WebSocket/REST  ⇄  Studio Forge server (Node,
   { "name": "Coins", "parent": "Panel", "type": "TextLabel", "size": [1, 0, 1, 0], "text": "🪙 1,250", "font": "GothamBold", "textSize": 24 } ] }
 ```
 
-The `examples/` folder has a 76-part cabin and a full item-shop UI. Add them with **Assets → + JSON**.
+The `examples/` folder has a 76-part cabin and a full item-shop UI (add them with **Assets → + JSON**), plus HTML pages in `examples/html/` (add them with **Assets → HTML**).
 
 ## Security
 
@@ -126,11 +156,13 @@ npm run typecheck
 The tests that execute generated Luau need [Lune](https://lune-org.github.io/docs) (`cargo install lune`) and are skipped without it.
 - Every model, UI and script fixture is converted both ways: generated Luau is executed against Roblox's instance model in Lune, the `.rbxmx` export is deserialized, and the two resulting instance trees must match property for property.
 - The end-to-end test starts the real server with a fake Claude Code CLI (`test/fake-claude.mjs`) and a mock Studio MCP server (`scripts/mock-studio-mcp.ts`, which runs Luau in Lune against a persistent place file).
+- The HTML translation test drives a real Chromium (via `playwright-core`; set `CHROMIUM_PATH` if it isn't found, otherwise it's skipped). It translates `test/html/hud.html` through the `create_ui_html` tool, checks anchoring, names and styling, applies an `edit_ui_html` edit, and confirms the result builds identical instances via Luau and `.rbxmx`.
 - You can point **Settings → Roblox Studio** at `npm run mock-studio` to try the app without Studio.
 
 ## Status and limitations
 
 - Not yet tested against a live Roblox Studio. Conversions are verified with Lune (Roblox's reflection database). The Studio MCP integration follows the tool schemas of Studio's built-in server and was exercised against the mock server. Please report anything that behaves differently in real Studio.
-- The UI preview uses Roblox's layout rules exactly. Roblox's own fonts (Gotham, Builder Sans) are proprietary, so the preview approximates them with Montserrat and Inter. Text widths can differ slightly.
+- The UI preview uses Roblox's layout rules exactly. Roblox's own fonts (Gotham, Builder Sans) are proprietary, so the preview approximates them with Montserrat and Inter. Text widths can differ slightly, and HTML text is mapped to the closest Roblox font (Inter → Builder Sans, Montserrat → Gotham, and so on).
+- HTML translation is a faithful snapshot of the rendered page, not a live layout. Lists built from HTML use absolute positions, not `UIListLayout`. Layered frames only approximate soft shadows.
 - Image previews load `rbxassetid://` thumbnails through Roblox's public thumbnail API. Unknown ids show a placeholder.
 - Parts only (no MeshParts or unions). Pulling a selection skips unsupported objects and lists them.

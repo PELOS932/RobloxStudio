@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, socket } from "./lib/api.ts";
 import type {
   Asset, AssetSummary, ChatMessage, ClaudeStatus, Conversation, ConversationMeta, ConvStatus,
-  ImportResult, PermissionRequest, ServerEvent, Settings, StudioStatus,
+  HtmlConvertRequest, ImportResult, PermissionRequest, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
 export type RightTab = "preview" | "assets" | "studio";
@@ -36,6 +36,7 @@ interface State {
   mobileView: MobileView;
   sidebarOpen: boolean;
   settingsOpen: false | "general" | "account" | "studio" | "import" | "advanced";
+  htmlImportOpen: boolean;
   composerInsert: { text: string; nonce: number } | null;
   importing: Record<string, boolean>;
 }
@@ -62,6 +63,7 @@ export const useStore = create<State>(() => ({
   mobileView: "chat",
   sidebarOpen: true,
   settingsOpen: false,
+  htmlImportOpen: false,
   composerInsert: null,
   importing: {},
 }));
@@ -176,6 +178,20 @@ function onEvent(e: ServerEvent) {
     case "toast":
       toast(e.message, e.level);
       break;
+    case "convert.html":
+      void handleConvert(e.id, e.request);
+      break;
+  }
+}
+
+/** The server asks this tab to translate HTML (it needs a real browser layout engine). */
+async function handleConvert(id: string, request: HtmlConvertRequest) {
+  try {
+    const { convertHtmlToUi } = await import("./lib/html-to-ui.ts");
+    const r = await convertHtmlToUi(request.html, { name: request.name, width: request.width, height: request.height, autoScale: request.autoScale });
+    socket.send({ type: "convert.result", id, spec: r.spec, warnings: r.warnings });
+  } catch (err) {
+    socket.send({ type: "convert.result", id, error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -186,7 +202,11 @@ function omit<T extends Record<string, unknown>>(o: T, key: string): T {
 
 export function startConnection() {
   socket.onEvent = onEvent;
-  socket.onConnection = (up) => set({ online: up });
+  socket.onConnection = (up) => {
+    set({ online: up });
+    // This tab can render HTML, so the server may ask it to translate HTML UIs.
+    if (up) socket.send({ type: "hello", capabilities: ["convert.html"] });
+  };
   socket.connect();
 }
 

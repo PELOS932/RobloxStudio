@@ -73,7 +73,7 @@ local env = setmetatable({
 	workspace = game:GetService("Workspace"),
 	shared = {},
 	Instance = roblox.Instance, Vector3 = roblox.Vector3, Vector2 = roblox.Vector2, CFrame = roblox.CFrame,
-	Color3 = roblox.Color3, UDim = roblox.UDim, UDim2 = roblox.UDim2, Rect = roblox.Rect, Enum = roblox.Enum,
+	Color3 = roblox.Color3, UDim = roblox.UDim, UDim2 = roblox.UDim2, Rect = roblox.Rect, Enum = roblox.Enum, Font = roblox.Font,
 	ColorSequence = roblox.ColorSequence, ColorSequenceKeypoint = roblox.ColorSequenceKeypoint,
 	NumberSequence = roblox.NumberSequence, NumberSequenceKeypoint = roblox.NumberSequenceKeypoint,
 }, { __index = getfenv(1) })

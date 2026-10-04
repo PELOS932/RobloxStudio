@@ -16,9 +16,17 @@ interface AssetBase {
   lastImport?: { at: number; path: string; version: number };
 }
 
+/** Original HTML a UI was translated from (kept so it can be edited and re-translated). */
+export interface HtmlSource {
+  source: string;
+  width: number;
+  height: number;
+  autoScale: boolean;
+}
+
 export type Asset =
   | (AssetBase & { kind: "model"; spec: ModelSpec })
-  | (AssetBase & { kind: "ui"; spec: UiSpec })
+  | (AssetBase & { kind: "ui"; spec: UiSpec; html?: HtmlSource })
   | (AssetBase & { kind: "script"; spec: ScriptSpec });
 
 export interface AssetSummary {
@@ -29,11 +37,12 @@ export interface AssetSummary {
   updatedAt: number;
   size: number;
   lastImport?: Asset["lastImport"];
+  fromHtml?: boolean;
 }
 
 export function summarize(a: Asset): AssetSummary {
   const size = a.kind === "model" ? a.spec.parts.length : a.kind === "ui" ? a.spec.nodes.length : a.spec.source.split("\n").length;
-  return { id: a.id, kind: a.kind, name: a.name, version: a.version, updatedAt: a.updatedAt, size, lastImport: a.lastImport };
+  return { id: a.id, kind: a.kind, name: a.name, version: a.version, updatedAt: a.updatedAt, size, lastImport: a.lastImport, fromHtml: a.kind === "ui" && !!a.html };
 }
 
 export function sizeLabel(kind: AssetKind, size: number): string {

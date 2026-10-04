@@ -133,12 +133,23 @@ export type ServerEvent =
   | { type: "permission"; request: PermissionRequest }
   | { type: "permission.resolved"; id: string }
   | { type: "login"; line: string; done?: boolean }
-  | { type: "toast"; level: "info" | "success" | "error"; message: string };
+  | { type: "toast"; level: "info" | "success" | "error"; message: string }
+  | { type: "convert.html"; id: string; request: HtmlConvertRequest };
+
+export interface HtmlConvertRequest {
+  name: string;
+  html: string;
+  width: number;
+  height: number;
+  autoScale: boolean;
+}
 
 export type ClientEvent =
   | { type: "chat.send"; convId: string; text: string; images?: { mediaType: string; data: string }[] }
   | { type: "chat.stop"; convId: string }
-  | { type: "permission.respond"; id: string; allow: boolean; always?: boolean };
+  | { type: "permission.respond"; id: string; allow: boolean; always?: boolean }
+  | { type: "convert.result"; id: string; spec?: unknown; warnings?: string[]; error?: string }
+  | { type: "hello"; capabilities: string[] };
 
 export interface ImportResult {
   ok: boolean;

@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pet Shop</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1280px; height: 720px; font-family: Inter, sans-serif; background: linear-gradient(#6fa8dc, #3f7a3c); }
+  .overlay { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); }
+  .shop { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 860px; height: 540px;
+          background: #161925; border-radius: 22px; border: 2px solid #2f3550; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+          display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 14px; padding: 18px 22px; background: linear-gradient(90deg, #7c3aed, #2563eb); }
+  header h1 { margin: 0; font-family: Fredoka, sans-serif; font-weight: 600; font-size: 30px; color: #fff; flex: 1; }
+  .coins { background: rgba(0,0,0,.3); color: #ffd166; padding: 8px 14px; border-radius: 999px; font-weight: 800; font-size: 16px; }
+  .close { width: 40px; height: 40px; border-radius: 12px; border: 0; background: #ef4444; color: #fff; font-size: 18px; font-weight: 800; }
+  .tabs { display: flex; gap: 10px; padding: 14px 22px 0; }
+  .tab { padding: 8px 16px; border-radius: 10px; background: #222739; color: #9aa3c0; font-weight: 600; font-size: 14px; }
+  .tab.active { background: #fff; color: #161925; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 16px 22px 22px; overflow-y: auto; flex: 1; }
+  .card { background: #1f2333; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 8px; position: relative; border: 1px solid #2b3047; }
+  .art { height: 96px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 44px; }
+  .rarity { position: absolute; top: 18px; left: 18px; font-size: 10px; font-weight: 800; letter-spacing: .5px; padding: 3px 8px; border-radius: 6px; background: rgba(0,0,0,.45); color: #fff; }
+  .name { color: #eef0f7; font-weight: 600; font-size: 15px; }
+  .price { color: #ffd166; font-size: 13px; font-weight: 600; }
+  .price s { color: #8b91a8; font-weight: 400; margin-left: 6px; }
+  .buy { margin-top: auto; height: 34px; border: 0; border-radius: 10px; background: #22c55e; color: #052e13; font-weight: 800; font-size: 14px; }
+  .buy.owned { background: #2b3047; color: #8b91a8; }
+</style>
+</head>
+<body>
+  <div class="overlay"></div>
+  <div class="shop" id="PetShop">
+    <header>
+      <h1>🐾 Pet Shop</h1>
+      <div class="coins" id="CoinCount">🪙 12,450</div>
+      <button class="close" id="CloseButton">✕</button>
+    </header>
+    <div class="tabs">
+      <div class="tab active">All</div><div class="tab">Common</div><div class="tab">Rare</div><div class="tab">Legendary</div>
+    </div>
+    <div class="grid" id="PetGrid">
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#f97316,#ef4444)">🐉</div><span class="rarity">LEGEND</span><div class="name">Fire Dragon</div><div class="price">🪙 2,500 <s>3,000</s></div><button class="buy">Buy</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#38bdf8,#6366f1)">🐧</div><span class="rarity">RARE</span><div class="name">Ice Penguin</div><div class="price">🪙 900</div><button class="buy">Buy</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#a855f7,#ec4899)">🦄</div><span class="rarity">EPIC</span><div class="name">Unicorn</div><div class="price">🪙 1,800</div><button class="buy owned">Owned</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#22c55e,#14b8a6)">🐢</div><span class="rarity">COMMON</span><div class="name">Turtle</div><div class="price">🪙 150</div><button class="buy">Buy</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#facc15,#f97316)">🦁</div><span class="rarity">EPIC</span><div class="name">Golden Lion</div><div class="price">🪙 2,100</div><button class="buy">Buy</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#64748b,#0f172a)">🐺</div><span class="rarity">RARE</span><div class="name">Shadow Wolf</div><div class="price">🪙 1,200</div><button class="buy">Buy</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#fb7185,#f43f5e)">🦊</div><span class="rarity">RARE</span><div class="name">Lucky Fox</div><div class="price">🪙 1,050</div><button class="buy">Buy</button></div>
+      <div class="card"><div class="art" style="background: linear-gradient(135deg,#84cc16,#10b981)">🐸</div><span class="rarity">COMMON</span><div class="name">Frog</div><div class="price">🪙 90</div><button class="buy">Buy</button></div>
+    </div>
+  </div>
+</body>
+</html>

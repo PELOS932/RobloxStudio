@@ -219,6 +219,8 @@ const TOOL_META: Record<string, { icon: IconName; title: string }> = {
   edit_model: { icon: "cube", title: "Edited model" },
   create_ui: { icon: "layout", title: "Designed UI" },
   edit_ui: { icon: "layout", title: "Edited UI" },
+  create_ui_html: { icon: "layout", title: "Designed UI (HTML)" },
+  edit_ui_html: { icon: "layout", title: "Edited UI (HTML)" },
   create_script: { icon: "code", title: "Wrote script" },
   list_assets: { icon: "grid", title: "Listed assets" },
   get_asset: { icon: "eye", title: "Read asset" },
@@ -255,7 +257,7 @@ function ToolCard({ block }: { block: Extract<Block, { type: "tool" }> }) {
   const input = block.input as any;
   const subject = toolSubject(short, input);
   const assetId = block.result?.text.match(/\b([mus]_[a-z0-9]{6})\b/)?.[1] ?? (typeof input?.id === "string" ? input.id : undefined);
-  const assetTool = ["create_model", "edit_model", "create_ui", "edit_ui", "create_script", "import_to_studio", "studio_pull_selection"].includes(short);
+  const assetTool = ["create_model", "edit_model", "create_ui", "edit_ui", "create_ui_html", "edit_ui_html", "create_script", "import_to_studio", "studio_pull_selection"].includes(short);
   const firstLine = block.result?.text.split("\n").find((l) => /Imported|Updated in Studio|failed/i.test(l));
 
   let detail: ReactNode = null;

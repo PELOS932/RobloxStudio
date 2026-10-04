@@ -96,7 +96,7 @@ export const FONTS = {
   Nunito: { family: "Nunito", weight: 400, style: "Normal", web: "Nunito", value: 35 },
   Oswald: { family: "Oswald", weight: 400, style: "Normal", web: "Oswald", value: 36 },
   Merriweather: { family: "Merriweather", weight: 400, style: "Normal", web: "Merriweather", value: 33 },
-  FredokaOne: { family: "FredokaOne", weight: 400, style: "Normal", web: "Fredoka", value: 26 },
+  FredokaOne: { family: "FredokaOne", weight: 400, style: "Normal", web: "Fredoka", value: 26, webWeight: 600 },
   LuckiestGuy: { family: "LuckiestGuy", weight: 400, style: "Normal", web: "Luckiest Guy", value: 32 },
   Bangers: { family: "Bangers", weight: 400, style: "Normal", web: "Bangers", value: 22 },
   Creepster: { family: "Creepster", weight: 400, style: "Normal", web: "Creepster", value: 23 },
@@ -130,3 +130,11 @@ export const FONT_NAMES = Object.keys(FONTS) as [FontName, ...FontName[]];
 
 /** Roblox top bar inset used when a ScreenGui does not ignore the GUI inset. */
 export const TOPBAR_INSET = 58;
+
+export const FONT_WEIGHT_NAMES: Record<number, string> = {
+  100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular", 500: "Medium", 600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Heavy",
+};
+
+export function fontFamilyUrl(font: FontName): string {
+  return `rbxasset://fonts/families/${FONTS[font].family}.json`;
+}

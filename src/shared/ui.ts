@@ -32,9 +32,10 @@ export const UiNodeSchema = z.object({
     .describe("UIStroke border (outside the edge)"),
   gradient: z
     .object({
-      colors: z.array(hexColor).min(2).max(8).describe("evenly spaced stops"),
+      colors: z.array(hexColor).min(2).max(8).describe("color stops (evenly spaced unless stops is given)"),
+      stops: z.array(z.number().min(0).max(1)).min(2).max(8).optional().describe("stop positions 0..1, same length as colors"),
       rotation: z.number().optional().describe("degrees; 0 = left→right, 90 = top→bottom"),
-      transparency: z.array(z.number().min(0).max(1)).min(2).max(8).optional().describe("evenly spaced"),
+      transparency: z.array(z.number().min(0).max(1)).min(2).max(8).optional().describe("per color stop (or evenly spaced)"),
     })
     .optional()
     .describe("UIGradient (multiplies node colors; use bg #ffffff for exact colors)"),
@@ -65,6 +66,7 @@ export const UiNodeSchema = z.object({
   textT: z.number().min(0).max(1).optional().describe("TextTransparency"),
   textStroke: z.object({ color: hexColor.optional(), transparency: z.number().min(0).max(1).optional() }).optional(),
   rich: z.boolean().optional().describe("RichText"),
+  truncate: z.boolean().optional().describe("TextTruncate AtEnd (… when text doesn't fit)"),
   placeholder: z.string().optional().describe("TextBox PlaceholderText"),
   placeholderColor: hexColor.optional(),
   image: z.string().optional().describe("rbxassetid://ID"),
@@ -84,7 +86,16 @@ export const UiSpecSchema = z.object({
   ignoreInset: z.boolean().optional().describe("IgnoreGuiInset (cover the top bar), default false"),
   resetOnSpawn: z.boolean().optional().describe("default false"),
   displayOrder: z.number().int().optional(),
-  nodes: z.array(UiNodeSchema).min(1).max(1500).describe("flat list; children reference parent by name; list order = sibling order"),
+  autoScale: z
+    .object({
+      width: z.number().min(200).max(4000).describe("design width px"),
+      height: z.number().min(200).max(4000).describe("design height px"),
+      min: z.number().min(0.1).max(1).optional().describe("smallest scale, default 0.35"),
+      max: z.number().min(1).max(4).optional().describe("largest scale, default 1.5"),
+    })
+    .optional()
+    .describe("Scale the whole UI proportionally from a design resolution (adds a UIScale + small LocalScript)"),
+  nodes: z.array(UiNodeSchema).min(1).max(3000).describe("flat list; children reference parent by name; list order = sibling order"),
 });
 
 export type UiNode = z.infer<typeof UiNodeSchema>;
@@ -274,4 +285,43 @@ export function applyUiEdit(spec: UiSpec, edit: UiEdit): { spec: UiSpec; missing
   if (edit.add?.length) nodes = nodes.concat(edit.add);
   const { spec: next, warnings } = sanitizeUiSpec({ ...spec, name: edit.rename ?? spec.name, nodes });
   return { spec: next, missing, warnings };
+}
+
+/** Gradient stop positions (explicit or evenly spaced) and transparency per stop. */
+export function gradientStops(g: NonNullable<UiNode["gradient"]>): { t: number; color: string; transparency: number }[] {
+  const n = g.colors.length;
+  const pos = g.stops && g.stops.length === n ? g.stops : g.colors.map((_, i) => i / (n - 1));
+  const tr = g.transparency;
+  return g.colors.map((color, i) => {
+    let transparency = 0;
+    if (tr && tr.length === n) transparency = tr[i];
+    else if (tr && tr.length >= 2) {
+      const x = pos[i] * (tr.length - 1);
+      const k = Math.min(tr.length - 2, Math.floor(x));
+      transparency = tr[k] + (tr[k + 1] - tr[k]) * (x - k);
+    }
+    return { t: pos[i], color, transparency };
+  });
+}
+
+export const AUTO_SCALE_ROOT = "AutoScaleRoot";
+
+export function autoScaleSource(a: NonNullable<UiSpec["autoScale"]>): string {
+  return `-- Studio Forge: keeps this UI proportional on every screen (designed at ${a.width}x${a.height}).
+local gui = script.Parent
+local root = gui:WaitForChild("${AUTO_SCALE_ROOT}")
+local uiScale = root:WaitForChild("AutoScale")
+local DESIGN = Vector2.new(${a.width}, ${a.height})
+
+local function update()
+	local size = gui.AbsoluteSize
+	if size.X < 2 or size.Y < 2 then return end
+	local scale = math.clamp(math.min(size.X / DESIGN.X, size.Y / DESIGN.Y), ${a.min ?? 0.35}, ${a.max ?? 1.5})
+	uiScale.Scale = scale
+	root.Size = UDim2.fromScale(1 / scale, 1 / scale)
+end
+
+gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(update)
+update()
+`;
 }

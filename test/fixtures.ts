@@ -70,3 +70,15 @@ export const doorScript: ScriptSpec = {
   parent: "ServerScriptService",
   source: 'local msg = "say \\"hi\\" ]] ]=] ]==]"\nprint(msg, [[\nlong]])\n-- ünïcødé ✓\n',
 };
+
+/** Auto-scaled HUD with explicit gradient stops and truncated text. */
+export const scaledHud: UiSpec = {
+  name: "ScaledHud",
+  ignoreInset: true,
+  autoScale: { width: 1280, height: 720, min: 0.4 },
+  nodes: [
+    { name: "Health", type: "Frame", pos: [0, 24, 1, -24], anchor: [0, 1], size: [0, 320, 0, 28], bg: "#ffffff", corner: [0.5, 0],
+      gradient: { colors: ["#ef4444", "#f97316", "#facc15"], stops: [0, 0.7, 1], transparency: [0, 0.1, 0.3], rotation: 0 } },
+    { name: "Quest", type: "TextLabel", parent: "Health", pos: [0, 0, 0, -30], size: [1, 0, 0, 22], text: "Defeat the dragon in the northern mountains before nightfall", truncate: true, xAlign: "left", textSize: 16 },
+  ],
+};

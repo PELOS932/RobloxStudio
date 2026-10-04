@@ -3,13 +3,16 @@
 // can be edited by Claude and re-imported.
 
 import { luaString } from "./luau.ts";
+import { FONTS } from "./roblox-data.ts";
 
 /** Max characters returned per execute_luau call (Studio caps results at ~100k). */
 export const PULL_CHUNK = 60_000;
 
 export function pullSelectionLuau(): string {
+  const faces = Object.entries(FONTS).map(([name, f]) => `["${f.family}:${f.weight}:${f.style}"] = "${name}"`).join(", ");
   return String.raw`
 local HttpService = game:GetService("HttpService")
+local FONT_BY_FACE = { ${faces} }
 local selection = game:GetService("Selection"):Get()
 
 local function r(n, d)
@@ -80,6 +83,10 @@ elseif wantsGui then
 			set(n, "textColor", hex(obj.TextColor3), "#ffffff")
 			set(n, "textSize", obj.TextSize, 18)
 			local fontName = obj.Font.Name
+			if fontName == "Unknown" then
+				local family = string.match(obj.FontFace.Family, "families/([%w]+)%.json")
+				fontName = FONT_BY_FACE[(family or "") .. ":" .. obj.FontFace.Weight.Value .. ":" .. obj.FontFace.Style.Name] or "Unknown"
+			end
 			if fontName ~= "Unknown" then set(n, "font", fontName, "GothamMedium") end
 			set(n, "textScaled", obj.TextScaled, false)
 			set(n, "textWrapped", obj.TextWrapped, false)
