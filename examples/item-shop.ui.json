@@ -1,0 +1,1376 @@
+{
+  "kind": "ui",
+  "spec": {
+    "name": "ItemShop",
+    "description": "Dark item shop with tabs, coin counter and an 8-item grid",
+    "ignoreInset": true,
+    "nodes": [
+      {
+        "name": "Dim",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "bg": "#000000",
+        "bgT": 0.45
+      },
+      {
+        "name": "Window",
+        "parent": "Dim",
+        "type": "Frame",
+        "pos": [
+          0.5,
+          0,
+          0.5,
+          0
+        ],
+        "size": [
+          0.62,
+          0,
+          0.74,
+          0
+        ],
+        "anchor": [
+          0.5,
+          0.5
+        ],
+        "bg": "#14161e",
+        "corner": 18,
+        "stroke": {
+          "color": "#2d3142",
+          "thickness": 2
+        },
+        "aspect": 1.5
+      },
+      {
+        "name": "TitleBar",
+        "parent": "Window",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          64
+        ],
+        "bgT": 1,
+        "padding": [
+          0,
+          20,
+          0,
+          22
+        ]
+      },
+      {
+        "name": "Title",
+        "parent": "TitleBar",
+        "type": "TextLabel",
+        "size": [
+          0.5,
+          0,
+          1,
+          0
+        ],
+        "text": "Item Shop",
+        "textColor": "#f3f4f8",
+        "textSize": 28,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Coins",
+        "parent": "TitleBar",
+        "type": "Frame",
+        "pos": [
+          1,
+          -56,
+          0.5,
+          0
+        ],
+        "size": [
+          0,
+          130,
+          0,
+          36
+        ],
+        "anchor": [
+          1,
+          0.5
+        ],
+        "bg": "#1f2230",
+        "corner": [
+          0.5,
+          0
+        ],
+        "stroke": {
+          "color": "#3a3f55",
+          "thickness": 1
+        }
+      },
+      {
+        "name": "CoinsText",
+        "parent": "Coins",
+        "type": "TextLabel",
+        "size": [
+          1,
+          0,
+          1,
+          0
+        ],
+        "text": "🪙 12,450",
+        "textColor": "#ffd166",
+        "textSize": 18,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Close",
+        "parent": "TitleBar",
+        "type": "TextButton",
+        "pos": [
+          1,
+          0,
+          0.5,
+          0
+        ],
+        "size": [
+          0,
+          40,
+          0,
+          40
+        ],
+        "anchor": [
+          1,
+          0.5
+        ],
+        "bg": "#2a2e3d",
+        "corner": 10,
+        "text": "✕",
+        "textColor": "#c9cbd6",
+        "textSize": 18,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Divider",
+        "parent": "Window",
+        "type": "Frame",
+        "pos": [
+          0,
+          0,
+          0,
+          64
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          1
+        ],
+        "bg": "#262a38"
+      },
+      {
+        "name": "Tabs",
+        "parent": "Window",
+        "type": "Frame",
+        "pos": [
+          0,
+          20,
+          0,
+          80
+        ],
+        "size": [
+          1,
+          -40,
+          0,
+          34
+        ],
+        "bgT": 1,
+        "layout": {
+          "type": "list",
+          "dir": "horizontal",
+          "gap": 8
+        }
+      },
+      {
+        "name": "Grid",
+        "parent": "Window",
+        "type": "ScrollingFrame",
+        "pos": [
+          0,
+          0,
+          0,
+          128
+        ],
+        "size": [
+          1,
+          0,
+          1,
+          -128
+        ],
+        "bgT": 1,
+        "padding": [
+          4,
+          20,
+          20,
+          20
+        ],
+        "layout": {
+          "type": "grid",
+          "hAlign": "left",
+          "cell": [
+            0.235,
+            0,
+            0,
+            210
+          ],
+          "cellGap": [
+            14,
+            14
+          ]
+        },
+        "canvas": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "autoCanvas": "y",
+        "scrollBar": 5,
+        "scrollColor": "#3a3f55"
+      },
+      {
+        "name": "TabFeatured",
+        "parent": "Tabs",
+        "type": "TextButton",
+        "size": [
+          0,
+          104,
+          1,
+          0
+        ],
+        "bg": "#7c5cff",
+        "order": 0,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "Featured",
+        "textColor": "#ffffff",
+        "textSize": 15,
+        "font": "GothamMedium"
+      },
+      {
+        "name": "TabWeapons",
+        "parent": "Tabs",
+        "type": "TextButton",
+        "size": [
+          0,
+          104,
+          1,
+          0
+        ],
+        "bg": "#1f2230",
+        "order": 1,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "Weapons",
+        "textColor": "#a7abbd",
+        "textSize": 15,
+        "font": "GothamMedium"
+      },
+      {
+        "name": "TabPets",
+        "parent": "Tabs",
+        "type": "TextButton",
+        "size": [
+          0,
+          104,
+          1,
+          0
+        ],
+        "bg": "#1f2230",
+        "order": 2,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "Pets",
+        "textColor": "#a7abbd",
+        "textSize": 15,
+        "font": "GothamMedium"
+      },
+      {
+        "name": "TabBoosts",
+        "parent": "Tabs",
+        "type": "TextButton",
+        "size": [
+          0,
+          104,
+          1,
+          0
+        ],
+        "bg": "#1f2230",
+        "order": 3,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "Boosts",
+        "textColor": "#a7abbd",
+        "textSize": 15,
+        "font": "GothamMedium"
+      },
+      {
+        "name": "Card1",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 0,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card1Art",
+        "parent": "Card1",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#ef4444",
+            "#f59e0b"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card1Rarity",
+        "parent": "Card1Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "LEGEND",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card1Name",
+        "parent": "Card1",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Dragon Blade",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card1Price",
+        "parent": "Card1",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 2,500",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card1Buy",
+        "parent": "Card1",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card2",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 1,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card2Art",
+        "parent": "Card2",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#38bdf8",
+            "#6366f1"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card2Rarity",
+        "parent": "Card2Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "EPIC",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card2Name",
+        "parent": "Card2",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Frost Bow",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card2Price",
+        "parent": "Card2",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 1,800",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card2Buy",
+        "parent": "Card2",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card3",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 2,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card3Art",
+        "parent": "Card3",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#a855f7",
+            "#ec4899"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card3Rarity",
+        "parent": "Card3Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "RARE",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card3Name",
+        "parent": "Card3",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Shadow Cat",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card3Price",
+        "parent": "Card3",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 3,200",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card3Buy",
+        "parent": "Card3",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card4",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 3,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card4Art",
+        "parent": "Card4",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#22c55e",
+            "#14b8a6"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card4Rarity",
+        "parent": "Card4Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "LEGEND",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card4Name",
+        "parent": "Card4",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Speed Boost",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card4Price",
+        "parent": "Card4",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 450",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card4Buy",
+        "parent": "Card4",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card5",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 4,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card5Art",
+        "parent": "Card5",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#facc15",
+            "#f97316"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card5Rarity",
+        "parent": "Card5Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "EPIC",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card5Name",
+        "parent": "Card5",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Golden Shield",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card5Price",
+        "parent": "Card5",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 2,100",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card5Buy",
+        "parent": "Card5",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card6",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 5,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card6Art",
+        "parent": "Card6",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#6366f1",
+            "#0ea5e9"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card6Rarity",
+        "parent": "Card6Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "RARE",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card6Name",
+        "parent": "Card6",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Void Staff",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card6Price",
+        "parent": "Card6",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 4,000",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card6Buy",
+        "parent": "Card6",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card7",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 6,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card7Art",
+        "parent": "Card7",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#fb923c",
+            "#f43f5e"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card7Rarity",
+        "parent": "Card7Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "LEGEND",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card7Name",
+        "parent": "Card7",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "Lucky Fox",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card7Price",
+        "parent": "Card7",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 2,750",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card7Buy",
+        "parent": "Card7",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card8",
+        "parent": "Grid",
+        "type": "Frame",
+        "bg": "#1b1e29",
+        "order": 7,
+        "corner": 14,
+        "stroke": {
+          "color": "#2a2e3e",
+          "thickness": 1
+        },
+        "padding": 10
+      },
+      {
+        "name": "Card8Art",
+        "parent": "Card8",
+        "type": "Frame",
+        "size": [
+          1,
+          0,
+          0,
+          104
+        ],
+        "bg": "#ffffff",
+        "corner": 10,
+        "gradient": {
+          "colors": [
+            "#10b981",
+            "#84cc16"
+          ],
+          "rotation": 45
+        }
+      },
+      {
+        "name": "Card8Rarity",
+        "parent": "Card8Art",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          8,
+          0,
+          8
+        ],
+        "size": [
+          0,
+          64,
+          0,
+          20
+        ],
+        "bg": "#000000",
+        "bgT": 0.55,
+        "corner": [
+          0.5,
+          0
+        ],
+        "text": "EPIC",
+        "textColor": "#ffffff",
+        "textSize": 10,
+        "font": "GothamBold"
+      },
+      {
+        "name": "Card8Name",
+        "parent": "Card8",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          112
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          22
+        ],
+        "text": "XP Potion",
+        "textColor": "#eef0f6",
+        "textSize": 16,
+        "font": "GothamBold",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card8Price",
+        "parent": "Card8",
+        "type": "TextLabel",
+        "pos": [
+          0,
+          0,
+          0,
+          134
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          18
+        ],
+        "text": "🪙 300",
+        "textColor": "#ffd166",
+        "textSize": 14,
+        "font": "GothamMedium",
+        "xAlign": "left"
+      },
+      {
+        "name": "Card8Buy",
+        "parent": "Card8",
+        "type": "TextButton",
+        "pos": [
+          0,
+          0,
+          1,
+          0
+        ],
+        "size": [
+          1,
+          0,
+          0,
+          34
+        ],
+        "anchor": [
+          0,
+          1
+        ],
+        "bg": "#22c55e",
+        "corner": 9,
+        "text": "Buy",
+        "textColor": "#062e14",
+        "textSize": 16,
+        "font": "GothamBold"
+      }
+    ]
+  }
+}
