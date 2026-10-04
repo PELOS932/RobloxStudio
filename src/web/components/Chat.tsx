@@ -781,6 +781,20 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
     if (attached && !attachedAsset) setAttached(null);
   }, [attached, attachedAsset]);
 
+  // "/" anywhere outside a text field jumps to the composer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (document.querySelector(".modal-backdrop")) return;
+      e.preventDefault();
+      focusEnd();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   function focusEnd() {
     requestAnimationFrame(() => {
       const el = ref.current;

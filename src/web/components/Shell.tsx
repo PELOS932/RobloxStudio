@@ -64,6 +64,7 @@ export function Sidebar() {
     return t;
   }, [conversations]);
   const hit = cacheRate(totals);
+  const anyUsage = totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens > 0;
 
   return (
     <aside className="sidebar">
@@ -100,7 +101,7 @@ export function Sidebar() {
         <dl className="usage-stats" title="Totals across all chats. Cost is the API-equivalent price; Claude subscriptions are not billed per token.">
           <div>
             <dt>prompt cache</dt>
-            <dd>{hit}%</dd>
+            <dd>{anyUsage ? `${hit}%` : "–"}</dd>
           </div>
           <div>
             <dt>tokens in / out</dt>

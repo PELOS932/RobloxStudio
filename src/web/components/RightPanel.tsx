@@ -63,7 +63,7 @@ function PreviewPane() {
         <div className="stage-empty">
           <div>
             <div className="big">Nothing to preview yet</div>
-            <div>Ask Claude for a model or UI — it appears here instantly and can be sent to Roblox Studio in one click.</div>
+            <div>Models, UIs and scripts open here as soon as Claude makes them.</div>
           </div>
         </div>
       </div>
@@ -132,7 +132,9 @@ function AssetBar({ asset }: { asset: AssetSummary }) {
         title={ready ? "Import into the open Roblox Studio place" : "Connect Roblox Studio first (Studio tab)"}
         onClick={() => (ready ? importAsset(asset.id) : (setRightTab("studio"), toast("Connect Roblox Studio first.", "info")))}
       >
-        <Icon name={importing ? "refresh" : "upload"} /> {importing ? "Importing…" : asset.lastImport ? "Update in Studio" : "Import to Studio"}
+        {importing ? <span className="spinner" /> : <Icon name="upload" />}{" "}
+        <span className="long">{importing ? "Importing…" : asset.lastImport ? "Update in Studio" : "Import to Studio"}</span>
+        <span className="short">{importing ? "Importing…" : asset.lastImport ? "Update" : "Import"}</span>
       </button>
       {asset.kind === "ui" && (
         <a className="btn" href={`/?render=${asset.id}`} target="_blank" rel="noreferrer" title="Open full size in a new tab">

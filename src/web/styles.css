@@ -1499,6 +1499,7 @@ button.ctx-chip:hover {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  container: panel / inline-size;
   border-left: 1px solid var(--border);
   background: var(--panel);
 }
@@ -1551,10 +1552,26 @@ button.ctx-chip:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 10px 8px 12px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
-  flex-wrap: wrap;
+}
+.asset-bar > .btn,
+.asset-bar > .dropdown {
+  flex: none;
+}
+.asset-bar .short {
+  display: none;
+}
+@container panel (max-width: 560px) {
+  .asset-bar .long,
+  .asset-bar .sub,
+  .asset-bar .badge {
+    display: none;
+  }
+  .asset-bar .short {
+    display: inline;
+  }
 }
 .asset-bar .name {
   font-weight: 600;
@@ -1569,7 +1586,7 @@ button.ctx-chip:hover {
   white-space: nowrap;
 }
 .asset-bar .grow {
-  flex: 1 1 160px;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: baseline;
@@ -1605,9 +1622,13 @@ button.ctx-chip:hover {
   padding: 24px;
 }
 .stage-empty .big {
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-dim);
   margin-bottom: 4px;
+}
+.stage-empty .big + div {
+  font: 12px var(--mono);
 }
 
 .viewer-canvas {
@@ -1680,8 +1701,9 @@ button.ctx-chip:hover {
 }
 .part-card .row b {
   color: var(--text);
-  font-weight: 500;
+  font: 11.5px/1.6 var(--mono);
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .swatch {
   display: inline-block;
