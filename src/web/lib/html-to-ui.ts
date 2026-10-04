@@ -681,16 +681,20 @@ class Converter {
       node.scaleType = fit === "contain" || fit === "scale-down" || fit === "none" ? "Fit" : fit === "cover" ? "Crop" : "Stretch";
       if (opacity < 1) node.imageT = round3(1 - opacity);
     } else if (isCheck) {
+      // Native look: a ticked checkbox is a filled accent box with a white tick;
+      // a selected radio is a white circle with an accent ring and dot.
       const checked = (el as HTMLInputElement).checked;
+      const accent = toHex(resolveColor(cs.accentColor && cs.accentColor !== "auto" ? cs.accentColor : "#3b82f6"));
+      const filled = checked && type === "checkbox";
       node.text = checked ? (type === "radio" ? "●" : "✓") : "";
-      node.textColor = toHex(resolveColor(cs.accentColor && cs.accentColor !== "auto" ? cs.accentColor : "#3b82f6"));
-      node.textSize = Math.round(box.h * 0.8);
+      node.textColor = filled ? "#ffffff" : accent;
+      node.textSize = Math.round(box.h * (type === "radio" ? 0.6 : 0.8));
       node.font = "BuilderSansBold";
       if (bg.a <= 0.01) {
-        node.bg = "#ffffff";
+        node.bg = filled ? accent : "#ffffff";
         node.bgT = round3(1 - opacity);
       }
-      node.stroke ??= { color: "#8a8f9c", thickness: 1 };
+      node.stroke ??= { color: checked ? accent : "#8a8f9c", thickness: 1 };
       node.corner ??= type === "radio" ? [0.5, 0] : 3;
     } else if (textLeaf || (isButton && tag === "select")) {
       if (tag === "select") {
