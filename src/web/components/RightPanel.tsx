@@ -10,6 +10,7 @@ import { UiPreview } from "./UiPreview.tsx";
 import { ScriptView } from "./ScriptView.tsx";
 import { StudioPanel } from "./StudioPanel.tsx";
 import { HtmlSourceView, retranslate } from "./HtmlTools.tsx";
+import { AssetThumb } from "./AssetThumb.tsx";
 
 export function RightPanel() {
   const tab = useStore((s) => s.rightTab);
@@ -195,13 +196,11 @@ function AssetLibrary() {
         {list.length === 0 && <div className="muted" style={{ padding: 16, textAlign: "center" }}>No assets{q ? " match" : " yet"}.</div>}
         {list.map((a) => (
           <div key={a.id} className={`asset-row ${a.id === activeId ? "active" : ""}`} onClick={() => openAsset(a.id)}>
-            <span className={`kind-badge ${a.kind}`}>
-              <KindIcon kind={a.kind} />
-            </span>
+            <AssetThumb id={a.id} kind={a.kind} version={a.version} width={72} height={45} />
             <div className="meta">
               <b>{a.name}</b>
               <small>
-                {sizeLabel(a.kind, a.size)} · v{a.version} · {timeAgo(a.updatedAt)}
+                {a.kind === "model" ? "model" : a.kind === "ui" ? "ui" : "script"} · {sizeLabel(a.kind, a.size)} · v{a.version} · {timeAgo(a.updatedAt)}
               </small>
             </div>
             {a.fromHtml && <span className="badge">HTML</span>}

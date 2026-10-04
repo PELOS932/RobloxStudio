@@ -121,7 +121,7 @@ export function HtmlImportDialog() {
           </div>
           {warnings.length > 0 && (
             <div className="card">
-              <h3><Icon name="sparkles" /> Translation notes</h3>
+              <h3>Translation notes</h3>
               <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text-dim)", fontSize: 13, display: "grid", gap: 4 }}>
                 {warnings.map((w) => <li key={w}>{w}</li>)}
               </ul>

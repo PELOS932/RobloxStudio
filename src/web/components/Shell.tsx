@@ -25,22 +25,31 @@ export function TopBar() {
         <Icon name="sidebar" />
       </button>
       <div className="brand">
-        <span className="brand-mark" />
+        <BrandMark />
         Studio Forge
       </div>
       <span className="topbar-spacer" />
-      <button className="pill" onClick={() => useStore.setState({ settingsOpen: "account" })} title="Claude Code account">
-        <span className={`dot ${claudeDot}`} />
+      <button className="status-btn" onClick={() => useStore.setState({ settingsOpen: "account" })} title="Claude Code account">
+        <i className={`sq ${claudeDot}`} />
         <span className="label">{claudeLabel}</span>
       </button>
-      <button className="pill" onClick={() => useStore.setState({ rightTab: "studio", mobileView: "panel" })} title="Roblox Studio connection">
-        <span className={`dot ${studioDot}`} />
+      <button className="status-btn" onClick={() => useStore.setState({ rightTab: "studio", mobileView: "panel" })} title="Roblox Studio connection">
+        <i className={`sq ${studioDot}`} />
         <span className="label">{studioLabel}</span>
       </button>
       <button className="icon-btn" title="Settings" onClick={() => useStore.setState({ settingsOpen: "general" })}>
         <Icon name="settings" />
       </button>
     </header>
+  );
+}
+
+/** An anvil, drawn in the accent colour. */
+export function BrandMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg className="brand-mark" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 7h15l3-1v3l-4 3h-2v3h3v3H6v-3h3v-3H7C5 12 3 10.5 3 7z" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -59,8 +68,8 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <button className="btn primary" onClick={startNewChat}>
-          <Icon name="plus" /> New chat
+        <button className="btn new-chat" onClick={startNewChat}>
+          <Icon name="plus" size={14} /> New chat
         </button>
       </div>
       <nav className="conv-list">
@@ -70,8 +79,8 @@ export function Sidebar() {
             <div className="conv-group">{label}</div>
             {list.map((c) => (
               <div key={c.id} className={`conv-item ${c.id === activeId ? "active" : ""}`} role="button" tabIndex={0} onClick={() => void openConversation(c.id)} onKeyDown={(e) => e.key === "Enter" && void openConversation(c.id)}>
-                {running[c.id] ? <span className="dot busy" /> : <Icon name="message" size={14} />}
                 <span className="title">{c.title}</span>
+                {running[c.id] && <span className="spinner" title="Working" />}
                 <button
                   className="icon-btn del"
                   title="Delete chat"
@@ -88,23 +97,22 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-foot">
-        <div className="usage-card" title="Totals across all chats. Cost is the API-equivalent price; Claude subscriptions are not billed per token.">
-          <div className="usage-row">
-            <span>Prompt cache hits</span>
-            <b>{hit}%</b>
+        <dl className="usage-stats" title="Totals across all chats. Cost is the API-equivalent price; Claude subscriptions are not billed per token.">
+          <div>
+            <dt>prompt cache</dt>
+            <dd>{hit}%</dd>
           </div>
-          <div className="meter"><span style={{ width: `${hit}%` }} /></div>
-          <div className="usage-row">
-            <span>Tokens in / out</span>
-            <b>{fmtTokens(totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens)} / {fmtTokens(totals.outputTokens)}</b>
+          <div>
+            <dt>tokens in / out</dt>
+            <dd>{fmtTokens(totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens)} / {fmtTokens(totals.outputTokens)}</dd>
           </div>
           {totals.costUsd > 0 && (
-            <div className="usage-row">
-              <span>API-equivalent</span>
-              <b>${totals.costUsd.toFixed(2)}</b>
+            <div>
+              <dt>api equivalent</dt>
+              <dd>${totals.costUsd.toFixed(2)}</dd>
             </div>
           )}
-        </div>
+        </dl>
       </div>
     </aside>
   );
@@ -183,7 +191,7 @@ export function Toasts() {
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.level}`}>
-          <Icon name={t.level === "error" ? "x" : t.level === "success" ? "check" : "sparkles"} />
+          <Icon name={t.level === "error" ? "x" : t.level === "success" ? "check" : "info"} size={14} />
           <span style={{ overflowWrap: "anywhere" }}>{t.message}</span>
         </div>
       ))}

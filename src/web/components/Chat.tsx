@@ -4,8 +4,9 @@ import remarkGfm from "remark-gfm";
 import {
   importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, updateSettings, useStore,
 } from "../store.ts";
-import { Icon, KindIcon, type IconName } from "../lib/icons.tsx";
+import { Icon, type IconName } from "../lib/icons.tsx";
 import { highlightLuau } from "./ScriptView.tsx";
+import { AssetThumb } from "./AssetThumb.tsx";
 import { sizeLabel, type AssetKind } from "../../shared/assets.ts";
 import type { Block, ChatMessage, Effort, TurnUsage } from "../../shared/protocol.ts";
 
@@ -143,16 +144,15 @@ export function Chat() {
               el?.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
             }}
           >
-            <Icon name="arrowDown" size={14} /> {status ? "Following reply" : "Jump to latest"}
+            <Icon name="arrowDown" size={13} /> Latest
           </button>
         )}
       </Composer>
       {dragging && (
         <div className="drop-overlay">
           <div>
-            <Icon name="image" size={28} />
             <b>Drop images to attach</b>
-            <span>Reference art, screenshots or sketches</span>
+            <span>PNG, JPG or WebP, up to 5 MB each</span>
           </div>
         </div>
       )}
@@ -195,20 +195,21 @@ function ChatHeader({ running }: { running: boolean }) {
         ) : (
           <button className="chat-title" title="Rename chat" onClick={() => (setTitle(meta.title), setEditing(true))}>
             <span>{meta.title}</span>
-            <Icon name="pencil" size={13} />
+            <Icon name="pencil" size={12} />
           </button>
         )
       ) : (
         <span className="chat-title muted-title">New chat</span>
       )}
-      <span className={`run-pill ${running ? "on" : ""}`}>
-        <span className={`dot ${running ? "busy" : "ok"}`} />
-        {running ? "Working" : "Ready"}
-      </span>
-      <span style={{ flex: 1 }} />
+      <span className="spacer" />
+      {running && (
+        <span className="run-state">
+          <span className="spinner" /> working
+        </span>
+      )}
       {lastUsage && lastUsage.contextTokens > 0 && (
-        <span className="ctx-pill hide-mobile" title="Tokens in the conversation context (most are served from the prompt cache)">
-          <Icon name="brain" size={13} /> {fmtTokens(lastUsage.contextTokens)} context
+        <span className="ctx-stat hide-mobile" title="Tokens in the conversation context (most are served from the prompt cache)">
+          {fmtTokens(lastUsage.contextTokens)} ctx
         </span>
       )}
       <button className="icon-btn" title="New chat" onClick={startNewChat}>
@@ -220,25 +221,38 @@ function ChatHeader({ running }: { running: boolean }) {
 
 // ---------------------------------------------------------------------------
 
+const KIND_LABEL: Record<AssetKind | "studio", string> = { model: "model", ui: "ui", script: "script", studio: "studio" };
+
 function Welcome() {
   const claude = useStore((s) => s.claude);
   const studio = useStore((s) => s.studio);
+  const settings = useStore((s) => s.settings);
   const studioReady = studio.state === "connected" && !!studio.studioId;
+  const place = studio.studios.find((s) => s.id === studio.studioId)?.name.replace(/\s*\(placeId:.*\)$/, "");
+  const model = MODELS.find((m) => m.id === settings?.model)?.label ?? settings?.model;
+  const claudeOk = claude.cli === "ok" && claude.loggedIn !== false;
   return (
-    <div className="hero">
-      <div className="hero-orb">
-        <span className="brand-mark" />
-      </div>
-      <h1>What are we building today?</h1>
-      <p>Describe a model, a UI or a script. You'll see it here instantly, and it can go into Roblox Studio with one click.</p>
-      <div className="hero-status">
-        <span className={`hero-chip ${claude.cli === "ok" && claude.loggedIn !== false ? "ok" : "warn"}`}>
-          <span className="dot" /> {claude.cli === "missing" ? "Claude Code not installed" : claude.loggedIn === false ? "Claude not signed in" : "Claude ready"}
-        </span>
-        <button className={`hero-chip ${studioReady ? "ok" : "warn"}`} onClick={() => useStore.setState({ rightTab: "studio", mobileView: "panel" })}>
-          <span className="dot" /> {studioReady ? "Studio connected" : "Studio not connected"}
-        </button>
-      </div>
+    <div className="welcome">
+      <h1>Describe a model, a UI or a script.</h1>
+      <p>It appears in the preview as soon as Claude makes it. One click puts it in your open Roblox Studio place.</p>
+      <dl className="readout">
+        <div>
+          <dt>Claude Code</dt>
+          <dd>
+            <i className={`sq ${claudeOk ? "ok" : "warn"}`} />
+            {claude.cli === "missing" ? "not installed" : claude.loggedIn === false ? "not signed in" : `ready${model ? ` · ${model}` : ""}`}
+          </dd>
+        </div>
+        <div>
+          <dt>Roblox Studio</dt>
+          <dd>
+            <i className={`sq ${studioReady ? "ok" : "warn"}`} />
+            <button className="link-btn" onClick={() => useStore.setState({ rightTab: "studio", mobileView: "panel" })}>
+              {studioReady ? place ?? "connected" : studio.state === "connected" ? "no place open" : "not connected"}
+            </button>
+          </dd>
+        </div>
+      </dl>
       {claude.cli === "missing" && (
         <div className="notice">
           Install the Claude Code CLI with <code>npm i -g @anthropic-ai/claude-code</code>, then sign in from Settings → Claude account.
@@ -250,20 +264,18 @@ function Welcome() {
           <button className="btn small" onClick={() => useStore.setState({ settingsOpen: "account" })}>Connect your Claude account</button>
         </div>
       )}
-      <div className="starters">
+      <div className="section-label">Examples</div>
+      <ul className="starters">
         {STARTERS.map((s) => (
-          <button key={s.title} className="starter" onClick={() => void sendMessage(s.prompt).catch((e) => toast(String(e), "error"))}>
-            <span className={`starter-icon kind-${s.kind}`}>
-              {s.kind === "studio" ? <Icon name="plug" size={16} /> : <KindIcon kind={s.kind} size={16} />}
-            </span>
-            <span className="starter-text">
-              <b>{s.title}</b>
-              <small>{s.sub}</small>
-            </span>
-            <Icon name="arrowUp" size={14} className="starter-go" />
-          </button>
+          <li key={s.title}>
+            <button className="starter" onClick={() => void sendMessage(s.prompt).catch((e) => toast(String(e), "error"))}>
+              <span className="starter-kind">{KIND_LABEL[s.kind]}</span>
+              <span className="starter-title">{s.title}</span>
+              <span className="starter-sub">{s.sub}</span>
+            </button>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
@@ -290,7 +302,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
         setTimeout(() => setDone(false), 1400);
       }}
     >
-      <Icon name={done ? "check" : "copy"} size={14} />
+      <Icon name={done ? "check" : "copy"} size={13} />
     </button>
   );
 }
@@ -334,49 +346,39 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
 
   return (
     <article className="msg msg-ai">
-      <div className="avatar" aria-hidden="true">
-        <span />
-      </div>
-      <div className="msg-main">
-        <div className="msg-head">
-          <b>Claude</b>
-          {model && <span className="model-tag">{model}</span>}
+      {segs.map((s, i) =>
+        s.kind === "text" ? (
+          <Markdown key={i} text={s.text} live={streamingText && i === segs.length - 1} />
+        ) : s.kind === "thinking" ? (
+          <Thinking key={i} text={s.text} live={live && i === segs.length - 1} />
+        ) : (
+          <Steps key={i} tools={s.tools} live={live} />
+        ),
+      )}
+      {assetIds.map((id) => <AssetCard key={id} id={id} />)}
+      {live && !streamingText && <LiveStatus message={message} />}
+      {message.error && (
+        <div className="msg-error">
+          <Icon name="x" size={13} />
+          <span>{message.error}</span>
+        </div>
+      )}
+      {message.interrupted && <div className="msg-note">Stopped.</div>}
+      {!live && (
+        <div className="msg-meta">
+          {model && <span>{model}</span>}
           <time>{timeOf(message.createdAt)}</time>
+          {message.usage && <UsageLine usage={message.usage} />}
+          <span className="msg-actions">
+            {text && <CopyButton text={text} label="Copy reply" />}
+            {isLast && onRetry && (message.error || message.interrupted) && (
+              <button className="act-btn" title="Retry" onClick={onRetry}>
+                <Icon name="refresh" size={13} />
+              </button>
+            )}
+          </span>
         </div>
-        <div className="msg-body">
-          {segs.map((s, i) =>
-            s.kind === "text" ? (
-              <Markdown key={i} text={s.text} live={streamingText && i === segs.length - 1} />
-            ) : s.kind === "thinking" ? (
-              <Thinking key={i} text={s.text} live={live && i === segs.length - 1} />
-            ) : (
-              <Steps key={i} tools={s.tools} live={live} />
-            ),
-          )}
-          {assetIds.map((id) => <AssetCard key={id} id={id} />)}
-          {live && !streamingText && <LiveStatus message={message} />}
-          {message.error && (
-            <div className="msg-error">
-              <Icon name="x" size={14} />
-              <span>{message.error}</span>
-            </div>
-          )}
-          {message.interrupted && <div className="msg-note">Stopped by you.</div>}
-        </div>
-        {!live && (
-          <div className="msg-foot">
-            {message.usage && <UsageLine usage={message.usage} />}
-            <span className="msg-actions">
-              {text && <CopyButton text={text} label="Copy reply" />}
-              {isLast && onRetry && (message.error || message.interrupted) && (
-                <button className="act-btn" title="Retry" onClick={onRetry}>
-                  <Icon name="refresh" size={14} />
-                </button>
-              )}
-            </span>
-          </div>
-        )}
-      </div>
+      )}
     </article>
   );
 });
@@ -388,18 +390,20 @@ function UserMessage({ message }: { message: ChatMessage }) {
   const text = m ? raw.slice(m[1].length) : raw;
   return (
     <article className="msg msg-user">
-      {mentions.length > 0 && (
-        <div className="mention-row">
-          {mentions.map((id) => <MentionChip key={id} id={id} />)}
+      <div className="user-box">
+        <div className="msg-actions user-actions">
+          <time>{timeOf(message.createdAt)}</time>
+          <CopyButton text={text} />
+          <button className="act-btn" title="Edit and resend" onClick={() => useStore.setState({ composerInsert: { text, nonce: Date.now(), replace: true } })}>
+            <Icon name="pencil" size={13} />
+          </button>
         </div>
-      )}
-      <div className="user-bubble">{text}</div>
-      <div className="msg-actions user-actions">
-        <time>{timeOf(message.createdAt)}</time>
-        <CopyButton text={text} />
-        <button className="act-btn" title="Edit and resend" onClick={() => useStore.setState({ composerInsert: { text, nonce: Date.now(), replace: true } })}>
-          <Icon name="pencil" size={14} />
-        </button>
+        {mentions.length > 0 && (
+          <div className="mention-row">
+            {mentions.map((id) => <MentionChip key={id} id={id} />)}
+          </div>
+        )}
+        <div className="user-text">{text}</div>
       </div>
     </article>
   );
@@ -409,8 +413,7 @@ function MentionChip({ id }: { id: string }) {
   const asset = useStore((s) => s.assets.find((a) => a.id === id));
   return (
     <button className="mention" onClick={() => asset && openAsset(id)} disabled={!asset}>
-      {asset ? <KindIcon kind={asset.kind} size={12} /> : <Icon name="link" size={12} />}
-      {asset?.name ?? id}
+      @{asset?.name ?? id}
     </button>
   );
 }
@@ -419,9 +422,9 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
   return (
     <details className="thinking">
       <summary>
-        <Icon name="brain" size={14} />
-        <span className={live ? "shimmer" : ""}>{live ? "Thinking…" : "Thought process"}</span>
-        <Icon name="chevronRight" size={13} className="chev" />
+        <Icon name="chevronRight" size={12} className="chev" />
+        {live ? "Thinking" : "Thought process"}
+        {live && <span className="spinner" />}
       </summary>
       <div className="thinking-body">{text}</div>
     </details>
@@ -430,22 +433,29 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
 
 function liveLabel(message: ChatMessage): string {
   const running = [...message.blocks].reverse().find((b): b is Extract<Block, { type: "tool" }> => b.type === "tool" && b.status === "running");
-  if (!running) return message.blocks.length ? "Thinking…" : "Starting…";
+  if (!running) return message.blocks.length ? "Thinking" : "Starting";
   const n = running.name.replace(/^mcp__forge__/, "");
-  if (n === "create_model" || n === "edit_model") return "Building the model…";
-  if (n.includes("ui")) return "Designing the UI…";
-  if (n === "create_script") return "Writing the script…";
-  if (n === "import_to_studio") return "Importing into Studio…";
-  if (n.startsWith("studio_")) return "Working in Studio…";
-  if (n === "permission_prompt") return "Waiting for your approval…";
-  return "Working…";
+  if (n === "create_model" || n === "edit_model") return "Building the model";
+  if (n.includes("ui")) return "Designing the UI";
+  if (n === "create_script") return "Writing the script";
+  if (n === "import_to_studio") return "Importing into Studio";
+  if (n.startsWith("studio_")) return "Working in Studio";
+  if (n === "permission_prompt") return "Waiting for your approval";
+  return "Working";
 }
 
 function LiveStatus({ message }: { message: ChatMessage }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = Math.max(0, Math.floor((now - message.createdAt) / 1000));
   return (
     <div className="live-status">
-      <span className="orbit" />
-      <span className="shimmer">{liveLabel(message)}</span>
+      <span className="spinner" />
+      <span>{liveLabel(message)}</span>
+      <span className="elapsed">{secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`}</span>
     </div>
   );
 }
@@ -464,18 +474,13 @@ export function cacheRate(u: { inputTokens: number; cacheReadTokens: number; cac
 }
 
 function UsageLine({ usage }: { usage: TurnUsage }) {
-  const rate = cacheRate(usage);
   return (
     <span
       className="usage"
       title={`Input ${usage.inputTokens} · cache read ${usage.cacheReadTokens} · cache write ${usage.cacheWriteTokens} · output ${usage.outputTokens}${usage.costUsd ? ` · $${usage.costUsd.toFixed(4)} API-equivalent (subscriptions aren't billed per token)` : ""}`}
     >
-      <span className={rate >= 70 ? "good" : ""}>
-        <Icon name="zap" size={12} /> {rate}% cached
-      </span>
-      <span>
-        <Icon name="clock" size={12} /> {(usage.durationMs / 1000).toFixed(1)}s
-      </span>
+      <span>{(usage.durationMs / 1000).toFixed(1)}s</span>
+      <span>{cacheRate(usage)}% cached</span>
       <span>{fmtTokens(usage.outputTokens)} out</span>
     </span>
   );
@@ -574,23 +579,16 @@ function toolSubject(name: string, input: any): string {
 function Steps({ tools, live }: { tools: Extract<Block, { type: "tool" }>[]; live: boolean }) {
   const running = tools.some((t) => t.status === "running");
   const failed = tools.filter((t) => t.status === "error" || t.status === "denied").length;
-  const done = tools.filter((t) => t.status === "done").length;
   const [open, setOpen] = useState<boolean | null>(null);
-  const expanded = open ?? (running || tools.length <= 2);
-  const title = running
-    ? `Working · step ${Math.min(tools.length, done + failed + 1)} of ${tools.length}`
-    : `${tools.length} step${tools.length > 1 ? "s" : ""}${failed ? ` · ${failed} failed` : ""}`;
+  const expanded = open ?? (running || tools.length <= 4);
   return (
-    <div className={`step-group ${running ? "running" : ""}`}>
+    <div className={`steps ${expanded ? "open" : ""}`}>
       <button className="steps-head" onClick={() => setOpen(!expanded)}>
-        <span className={`step-state ${running ? "running" : failed ? "error" : "done"}`}>
-          {running ? <span className="spinner" /> : <Icon name={failed ? "x" : "check"} size={12} />}
+        <Icon name="chevronRight" size={12} className="chev" />
+        <span>
+          {tools.length} tool call{tools.length > 1 ? "s" : ""}
         </span>
-        <span className="steps-title">{title}</span>
-        <span className="steps-preview">
-          {!expanded && tools.map((t, i) => <Icon key={i} name={(TOOL_META[t.name.replace(/^mcp__forge__/, "")] ?? { icon: "wrench" }).icon} size={13} />)}
-        </span>
-        <Icon name={expanded ? "chevronDown" : "chevronRight"} size={14} />
+        {failed > 0 && <span className="bad">· {failed} failed</span>}
       </button>
       {expanded && (
         <ol className="step-list">
@@ -620,35 +618,32 @@ function StepRow({ block }: { block: Extract<Block, { type: "tool" }>; live: boo
     }
     detail = (
       <div className="step-detail">
-        {inputView && <span className="tool-label">Input</span>}
+        {inputView && <span className="tool-label">input · {short}</span>}
         {inputView}
         {block.inputPartial && <pre>{block.inputPartial.slice(-2000)}</pre>}
         {block.result?.text && (
           <>
-            <span className="tool-label">Result</span>
+            <span className="tool-label">result</span>
             <pre>{block.result.text}</pre>
           </>
         )}
       </div>
     );
   }
+  const bad = block.status === "error" || block.status === "denied";
   return (
     <li className={`step ${block.status}`}>
-      <span className={`step-state ${block.status}`}>
-        {block.status === "running" ? <span className="spinner" /> : <Icon name={block.status === "done" ? meta.icon : block.status === "denied" ? "shield" : "x"} size={12} />}
-      </span>
-      <div className="step-main">
-        <button className="step-line" onClick={() => setOpen((v) => !v)}>
-          <b>{meta.title}</b>
-          {subject && <span className="step-subject">{subject}</span>}
-          {block.status === "denied" && <span className="step-tag bad">declined</span>}
-          {block.status === "error" && <span className="step-tag bad">failed</span>}
-          <Icon name={open ? "chevronDown" : "chevronRight"} size={12} className="chev" />
-        </button>
-        {note && !open && <div className={`step-note ${/fail|not applied|No /i.test(note) ? "bad" : ""}`}>{note.replace(/\.$/, "")}</div>}
-        {block.result?.images?.map((src, i) => <img key={i} className="step-image" src={src} alt="Studio viewport" />)}
-        {detail}
-      </div>
+      <button className="step-line" onClick={() => setOpen((v) => !v)} title={open ? "Hide details" : "Show input and result"}>
+        <span className="step-glyph">
+          {block.status === "running" ? <span className="spinner" /> : <Icon name={block.status === "done" ? "check" : block.status === "denied" ? "shield" : "x"} size={12} />}
+        </span>
+        <span className="step-title">{meta.title}</span>
+        {subject && <span className="step-subject">{subject}</span>}
+        {block.status === "denied" && <span className="step-tag">declined</span>}
+      </button>
+      {note && !open && <div className={`step-note ${bad || /fail|not applied/i.test(note) ? "bad" : ""}`}>{note.replace(/\.$/, "")}</div>}
+      {block.result?.images?.map((src, i) => <img key={i} className="step-image" src={src} alt="Studio viewport" />)}
+      {detail}
     </li>
   );
 }
@@ -661,25 +656,27 @@ function AssetCard({ id }: { id: string }) {
   const inStudio = asset.lastImport && asset.lastImport.version === asset.version;
   return (
     <div className={`asset-card ${active ? "active" : ""}`}>
-      <button className={`asset-thumb ${asset.kind}`} onClick={() => openAsset(id)} title="Open preview">
-        <KindIcon kind={asset.kind} size={22} />
+      <button className="asset-thumb" onClick={() => openAsset(id)} title="Open in the preview">
+        <AssetThumb id={id} kind={asset.kind} version={asset.version} width={112} height={70} />
       </button>
       <div className="asset-info">
-        <b>{asset.name}</b>
-        <span>
-          {asset.kind === "model" ? "3D model" : asset.kind === "ui" ? (asset.fromHtml ? "UI · from HTML" : "UI") : "Script"} · {sizeLabel(asset.kind, asset.size)} · v{asset.version}
+        <button className="asset-name" onClick={() => openAsset(id)}>{asset.name}</button>
+        <span className="asset-meta">
+          {asset.kind === "model" ? "model" : asset.kind === "ui" ? (asset.fromHtml ? "ui · html" : "ui") : "script"} · {sizeLabel(asset.kind, asset.size)} · v{asset.version}
         </span>
-        <span className={`asset-studio ${inStudio ? "ok" : ""}`}>
-          <span className="dot" />
-          {inStudio ? `In Studio · ${asset.lastImport!.path}` : asset.lastImport ? "Studio copy is outdated" : "Not in Studio yet"}
+        <span className={`asset-studio ${inStudio ? "ok" : asset.lastImport ? "stale" : ""}`}>
+          <i className="sq" />
+          {inStudio ? asset.lastImport!.path : asset.lastImport ? "Studio copy is out of date" : "not in Studio"}
         </span>
       </div>
       <div className="asset-actions">
-        <button className="btn small" onClick={() => openAsset(id)}>
-          <Icon name="eye" size={13} /> Preview
-        </button>
-        <button className="btn small primary" disabled={importing} onClick={() => void importAsset(id)}>
-          {importing ? <span className="spinner light" /> : <Icon name="upload" size={13} />} {inStudio ? "Re-import" : asset.lastImport ? "Update" : "Import"}
+        {!active && (
+          <button className="btn small ghost" onClick={() => openAsset(id)}>
+            Open
+          </button>
+        )}
+        <button className={`btn small ${inStudio ? "" : "primary"}`} disabled={importing} onClick={() => void importAsset(id)}>
+          {importing ? <span className="spinner" /> : <Icon name="upload" size={13} />} {inStudio ? "Re-import" : asset.lastImport ? "Update" : "Import"}
         </button>
       </div>
     </div>
@@ -688,11 +685,11 @@ function AssetCard({ id }: { id: string }) {
 
 // ---------------------------------------------------------------------------
 
-function Menu<T extends string>({ value, options, onChange, icon, label, title }: {
+function Menu<T extends string>({ value, options, onChange, prefix, label, title }: {
   value: T;
   options: { id: T; label: string; hint: string }[];
   onChange: (v: T) => void;
-  icon: IconName;
+  prefix: string;
   label: string;
   title: string;
 }) {
@@ -715,10 +712,10 @@ function Menu<T extends string>({ value, options, onChange, icon, label, title }
   }, [open]);
   return (
     <div className="menu-wrap" ref={ref}>
-      <button className={`pill-btn ${open ? "open" : ""}`} title={title} onClick={() => setOpen((v) => !v)}>
-        <Icon name={icon} size={13} />
+      <button className={`select-btn ${open ? "open" : ""}`} title={title} onClick={() => setOpen((v) => !v)}>
+        <span className="select-key">{prefix}</span>
         <span>{label}</span>
-        <Icon name="chevronDown" size={12} />
+        <Icon name="chevronDown" size={11} />
       </button>
       {open && (
         <div className="popover" role="menu">
@@ -837,15 +834,14 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
           <div className="composer-context">
             {attachedAsset ? (
               <span className="ctx-chip on" title="Claude will know which asset you mean">
-                <KindIcon kind={attachedAsset.kind} size={12} />
-                {attachedAsset.name}
+                @{attachedAsset.name}
                 <button aria-label="Remove asset" onClick={() => setAttached(null)}>
                   <Icon name="x" size={11} />
                 </button>
               </span>
             ) : activeAsset ? (
               <button className="ctx-chip" onClick={() => (setAttached(activeAsset.id), focusEnd())} title="Refer to the asset open in the preview">
-                <Icon name="plus" size={12} /> {activeAsset.name}
+                <Icon name="plus" size={11} /> @{activeAsset.name}
               </button>
             ) : null}
             {images.map((img, i) => (
@@ -862,7 +858,7 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
           ref={ref}
           rows={1}
           value={text}
-          placeholder={running ? "Claude is working… you can type your next message" : "Ask for a model, a UI or a script…"}
+          placeholder={running ? "Claude is working. You can type your next message." : "Ask for a model, a UI or a script"}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
             if (e.clipboardData.files.length) {
@@ -888,15 +884,15 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
           </label>
           {settings && (
             <>
-              <Menu value={settings.model} options={modelOptions} onChange={(v) => void updateSettings({ model: v })} icon="cpu" label={model?.label ?? settings.model} title="Model" />
+              <Menu value={settings.model} options={modelOptions} onChange={(v) => void updateSettings({ model: v })} prefix="model" label={model?.label ?? settings.model} title="Model" />
               <span className="hide-mobile">
-                <Menu value={settings.effort} options={EFFORTS} onChange={(v) => void updateSettings({ effort: v })} icon="gauge" label={effort?.label ?? "Auto"} title="Effort" />
+                <Menu value={settings.effort} options={EFFORTS} onChange={(v) => void updateSettings({ effort: v })} prefix="effort" label={effort?.label ?? "Auto"} title="Effort" />
               </span>
             </>
           )}
           <span className="spacer" />
           <span className="kbd-hint hide-mobile">
-            {running ? <><kbd>Esc</kbd> to stop</> : <><kbd>↵</kbd> send · <kbd>⇧↵</kbd> new line</>}
+            {running ? <><kbd>esc</kbd> stop</> : <><kbd>enter</kbd> send <kbd>shift+enter</kbd> newline</>}
           </span>
           {running ? (
             <button className="send-btn stop" title="Stop (Esc)" onClick={() => convId && stopConversation(convId)}>
@@ -904,12 +900,11 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
             </button>
           ) : (
             <button className="send-btn" title="Send (Enter)" disabled={!text.trim()} onClick={() => void submit()}>
-              <Icon name="arrowUp" size={17} />
+              <Icon name="arrowUp" size={16} />
             </button>
           )}
         </div>
       </div>
-      <div className="composer-foot hide-mobile">Claude Code runs on this computer with your own account · Studio Forge never stores your credentials</div>
     </div>
   );
 }

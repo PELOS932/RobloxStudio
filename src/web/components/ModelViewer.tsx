@@ -63,7 +63,7 @@ export function ModelViewer({ spec, onReference }: Props) {
     const scene = new THREE.Scene();
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.fog = new THREE.Fog(0x0d1017, 200, 900);
+    scene.fog = new THREE.Fog(0x0b0b0c, 200, 900);
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 5000);
     camera.position.set(14, 10, 18);
@@ -84,7 +84,7 @@ export function ModelViewer({ spec, onReference }: Props) {
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
-    const grid = new THREE.GridHelper(400, 100, 0x3a4157, 0x1f2433);
+    const grid = new THREE.GridHelper(400, 100, 0x38383e, 0x202024);
     (grid.material as THREE.Material).transparent = true;
     (grid.material as THREE.Material).opacity = 0.6;
     scene.add(grid);
@@ -260,7 +260,7 @@ export function ModelViewer({ spec, onReference }: Props) {
     if (!mesh) return setSelected(null);
     const lines = new THREE.LineSegments(
       new THREE.EdgesGeometry(mesh.geometry, 30),
-      new THREE.LineBasicMaterial({ color: 0xb6a4ff, depthTest: false, transparent: true }),
+      new THREE.LineBasicMaterial({ color: 0x4c9dff, depthTest: false, transparent: true }),
     );
     lines.renderOrder = 10;
     mesh.add(lines);

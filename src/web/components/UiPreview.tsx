@@ -38,7 +38,7 @@ function useWebFonts(spec: UiSpec, onLoaded: () => void) {
     const families = new Set(spec.nodes.map((n) => FONTS[n.font ?? "GothamMedium"]?.web).filter(Boolean) as string[]);
     let added = false;
     for (const fam of families) {
-      if (requestedFonts.has(fam) || fam === "Inter") continue;
+      if (requestedFonts.has(fam)) continue;
       requestedFonts.add(fam);
       const w = FONT_WEIGHTS[fam];
       const link = document.createElement("link");
