@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
-import { readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { DATA_DIR } from "./config.ts";
 import { summarize, type Asset, type AssetSummary } from "../shared/assets.ts";
-import type { Conversation, ConversationMeta, ServerEvent, UsageTotals } from "../shared/protocol.ts";
+import type { AssetVersion, Conversation, ConversationMeta, ServerEvent, UsageTotals } from "../shared/protocol.ts";
 
 /** Fan-out of server events to every connected browser tab. */
 export const bus = new (class extends EventEmitter {
@@ -43,8 +43,16 @@ function readJsonDir<T>(dir: string): T[] {
 
 // ---------------------------------------------------------------------------
 
+function pick(a: Asset) {
+  return { version: a.version, updatedAt: a.updatedAt, size: summarize(a).size, name: a.name };
+}
+
+/** Earlier versions kept per asset, so a bad edit can be rolled back. */
+const MAX_HISTORY = 25;
+
 class AssetStore {
   private dir = join(DATA_DIR, "assets");
+  private historyDir = join(DATA_DIR, "assets", "history");
   private assets = new Map<string, Asset>();
 
   constructor() {
@@ -59,17 +67,62 @@ class AssetStore {
     return this.assets.get(id);
   }
 
-  /** Insert or replace (bumping the version) and broadcast. */
+  /** Insert or replace (bumping the version) and broadcast. The replaced version goes to history. */
   put(asset: Asset, focus = true): Asset {
+    const prev = this.assets.get(asset.id);
+    if (prev && prev.version !== asset.version) this.archive(prev);
     this.assets.set(asset.id, asset);
     writeJsonAtomic(join(this.dir, `${asset.id}.json`), asset);
     bus.emitEvent({ type: "asset", asset: summarize(asset), focus });
     return asset;
   }
 
+  private archive(prev: Asset) {
+    const dir = join(this.historyDir, prev.id);
+    mkdirSync(dir, { recursive: true });
+    writeJsonAtomic(join(dir, `${prev.version}.json`), prev);
+    const old = this.storedVersions(prev.id).slice(0, -MAX_HISTORY);
+    for (const v of old) rmSync(join(dir, `${v}.json`), { force: true });
+  }
+
+  private storedVersions(id: string): number[] {
+    try {
+      return readdirSync(join(this.historyDir, id))
+        .map((f) => Number(f.replace(/\.json$/, "")))
+        .filter((n) => Number.isInteger(n))
+        .sort((a, b) => a - b);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Every stored version, newest first, the current one included. */
+  versions(id: string): AssetVersion[] {
+    const current = this.assets.get(id);
+    if (!current) return [];
+    const out: AssetVersion[] = [];
+    for (const v of this.storedVersions(id)) {
+      const a = this.version(id, v);
+      if (a && v !== current.version) out.push({ ...pick(a), current: false });
+    }
+    out.push({ ...pick(current), current: true });
+    return out.reverse();
+  }
+
+  version(id: string, version: number): Asset | undefined {
+    const current = this.assets.get(id);
+    if (current?.version === version) return current;
+    try {
+      return JSON.parse(readFileSync(join(this.historyDir, id, `${version}.json`), "utf8"));
+    } catch {
+      return undefined;
+    }
+  }
+
   delete(id: string): boolean {
     if (!this.assets.delete(id)) return false;
     rmSync(join(this.dir, `${id}.json`), { force: true });
+    rmSync(join(this.historyDir, id), { recursive: true, force: true });
     bus.emitEvent({ type: "asset.deleted", id });
     return true;
   }

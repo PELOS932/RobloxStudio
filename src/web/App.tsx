@@ -6,6 +6,7 @@ import { MobileNav, PermissionDialog, Sidebar, Toasts, TopBar } from "./componen
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { HtmlImportDialog } from "./components/HtmlTools.tsx";
 import { RenderOnly } from "./components/RenderOnly.tsx";
+import { CommandPalette, ShortcutsDialog } from "./components/CommandPalette.tsx";
 
 const renderId = new URLSearchParams(location.search).get("render");
 
@@ -19,10 +20,43 @@ function Workbench() {
   const booted = useStore((s) => s.booted);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const view = useStore((s) => s.mobileView);
+  const runningAny = useStore((s) => Object.keys(s.running).length > 0);
+  const unseenDone = useStore((s) => s.unseenDone);
+  const chatTitle = useStore((s) => s.conversations.find((c) => c.id === s.activeConvId)?.title);
 
   useEffect(() => {
     startConnection();
   }, []);
+
+  // Global shortcuts: Ctrl/Cmd+K opens the palette, "?" lists shortcuts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        useStore.setState((s) => ({ paletteOpen: !s.paletteOpen }));
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      const typing = t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+      if (e.key === "?" && !typing && !document.querySelector(".modal-backdrop")) {
+        e.preventDefault();
+        useStore.setState({ shortcutsOpen: true });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // The tab title shows progress, so a long build can run in the background.
+  useEffect(() => {
+    document.title = unseenDone
+      ? "✓ Reply ready · Studio Forge"
+      : runningAny
+        ? `Working… · ${chatTitle ?? "Studio Forge"}`
+        : chatTitle
+          ? `${chatTitle} · Studio Forge`
+          : "Studio Forge";
+  }, [unseenDone, runningAny, chatTitle]);
 
   return (
     <div className="app">
@@ -37,6 +71,8 @@ function Workbench() {
       <PermissionDialog />
       <SettingsDialog />
       <HtmlImportDialog />
+      <CommandPalette />
+      <ShortcutsDialog />
       <Toasts />
     </div>
   );

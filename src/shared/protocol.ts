@@ -118,7 +118,23 @@ export interface BootState {
   studio: StudioStatus;
   claude: ClaudeStatus;
   running: Record<string, ConvStatus>;
+  /** Follow-up messages waiting for the current turn to finish, per conversation. */
+  queues: Record<string, QueuedMessage[]>;
   permissions: PermissionRequest[];
+}
+
+export interface QueuedMessage {
+  id: string;
+  text: string;
+}
+
+/** One stored version of an asset (the current one included). */
+export interface AssetVersion {
+  version: number;
+  updatedAt: number;
+  size: number;
+  name: string;
+  current: boolean;
 }
 
 export type ServerEvent =
@@ -127,6 +143,7 @@ export type ServerEvent =
   | { type: "conversation.deleted"; id: string }
   | { type: "message"; convId: string; message: ChatMessage }
   | { type: "status"; convId: string; status: ConvStatus; error?: string }
+  | { type: "queue"; convId: string; items: QueuedMessage[] }
   | { type: "asset"; asset: AssetSummary; focus?: boolean }
   | { type: "asset.deleted"; id: string }
   | { type: "studio"; status: StudioStatus }
@@ -149,6 +166,7 @@ export interface HtmlConvertRequest {
 export type ClientEvent =
   | { type: "chat.send"; convId: string; text: string; images?: { mediaType: string; data: string }[] }
   | { type: "chat.stop"; convId: string }
+  | { type: "chat.unqueue"; convId: string; id: string }
   | { type: "permission.respond"; id: string; allow: boolean; always?: boolean }
   | { type: "convert.result"; id: string; spec?: unknown; warnings?: string[]; error?: string }
   | { type: "hello"; capabilities: string[] };

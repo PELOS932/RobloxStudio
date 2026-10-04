@@ -2,9 +2,10 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type React
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, updateSettings, useStore,
+  deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage, updateSettings, useStore,
 } from "../store.ts";
 import { Icon, type IconName } from "../lib/icons.tsx";
+import { api } from "../lib/api.ts";
 import { highlightLuau } from "./ScriptView.tsx";
 import { AssetThumb } from "./AssetThumb.tsx";
 import { sizeLabel, type AssetKind } from "../../shared/assets.ts";
@@ -17,7 +18,7 @@ export const MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", hint: "Fastest, lowest usage" },
 ];
 
-const EFFORTS: { id: Effort; label: string; hint: string }[] = [
+export const EFFORTS: { id: Effort; label: string; hint: string }[] = [
   { id: "default", label: "Auto", hint: "Let Claude decide" },
   { id: "low", label: "Low", hint: "Quick answers, least usage" },
   { id: "medium", label: "Medium", hint: "Good for most edits" },
@@ -74,7 +75,7 @@ export function Chat() {
       // Inputs and menus that use Esc themselves mark the event handled.
       if (e.key !== "Escape" || e.defaultPrevented) return;
       const s = useStore.getState();
-      if (!s.settingsOpen && !s.htmlImportOpen && !s.permissions.length) stopConversation(activeId);
+      if (!s.settingsOpen && !s.htmlImportOpen && !s.paletteOpen && !s.shortcutsOpen && !s.permissions.length) stopConversation(activeId);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -212,10 +213,64 @@ function ChatHeader({ running }: { running: boolean }) {
           {fmtTokens(lastUsage.contextTokens)} ctx
         </span>
       )}
+      {meta && (
+        <ChatMenu
+          onRename={() => (setTitle(meta.title), setEditing(true))}
+          onExport={() => void exportConversation(meta.id)}
+          onDelete={() => {
+            if (confirm(`Delete "${meta.title}"?`)) void deleteConversation(meta.id);
+          }}
+        />
+      )}
       <button className="icon-btn" title="New chat" onClick={startNewChat}>
         <Icon name="plus" />
       </button>
     </header>
+  );
+}
+
+function ChatMenu({ onRename, onExport, onDelete }: { onRename: () => void; onExport: () => void; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc, true);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", esc, true);
+    };
+  }, [open]);
+  const item = (label: string, icon: IconName, run: () => void, danger = false) => (
+    <button
+      className={danger ? "danger" : ""}
+      onClick={() => {
+        setOpen(false);
+        run();
+      }}
+    >
+      <Icon name={icon} size={13} /> {label}
+    </button>
+  );
+  return (
+    <div className="dropdown" ref={ref}>
+      <button className={`icon-btn ${open ? "active" : ""}`} title="Chat options" onClick={() => setOpen((v) => !v)}>
+        <Icon name="dots" />
+      </button>
+      {open && (
+        <div className="menu menu-compact">
+          {item("Rename", "pencil", onRename)}
+          {item("Export as Markdown", "download", onExport)}
+          {item("Delete chat", "trash", onDelete, true)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -516,25 +571,57 @@ function Markdown({ text, live }: { text: string; live?: boolean }) {
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   const luau = /^(lua|luau)$/i.test(lang);
+  const studioReady = useStore((s) => s.studio.state === "connected" && !!s.studio.studioId);
   const [copied, setCopied] = useState(false);
+  const [run, setRun] = useState<{ busy: boolean; ok?: boolean; output?: string } | null>(null);
+  const runInStudio = async () => {
+    setRun({ busy: true });
+    try {
+      const r = await api<{ ok: boolean; output: string }>("/studio/run", { body: { code } });
+      setRun({ busy: false, ok: r.ok, output: r.output });
+    } catch (err) {
+      setRun({ busy: false, ok: false, output: String(err) });
+    }
+  };
   return (
     <div className="codeblock">
       <div className="codeblock-head">
-        <span className="lang">{luau ? "Luau" : lang}</span>
-        <button
-          className="btn ghost small"
-          onClick={() => {
-            void navigator.clipboard?.writeText(code);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1400);
-          }}
-        >
-          <Icon name={copied ? "check" : "copy"} size={13} /> {copied ? "Copied" : "Copy"}
-        </button>
+        <span className="lang">{luau ? "luau" : lang}</span>
+        <span className="codeblock-actions">
+          {luau && (
+            <button
+              className="btn ghost small"
+              disabled={!studioReady || run?.busy}
+              title={studioReady ? "Run this code in the open Studio place (edit mode)" : "Connect Roblox Studio to run code"}
+              onClick={() => void runInStudio()}
+            >
+              {run?.busy ? <span className="spinner" /> : <Icon name="play" size={12} />} Run in Studio
+            </button>
+          )}
+          <button
+            className="btn ghost small"
+            onClick={() => {
+              void navigator.clipboard?.writeText(code);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1400);
+            }}
+          >
+            <Icon name={copied ? "check" : "copy"} size={12} /> {copied ? "Copied" : "Copy"}
+          </button>
+        </span>
       </div>
       <pre>
         <code>{luau ? highlightLuau(code).map((l, i) => <div key={i}>{l.length ? l : " "}</div>) : code}</code>
       </pre>
+      {run && !run.busy && (
+        <div className={`codeblock-out ${run.ok ? "ok" : "err"}`}>
+          <span className="tool-label">{run.ok ? "studio output" : "studio error"}</span>
+          <button className="act-btn" title="Dismiss" onClick={() => setRun(null)}>
+            <Icon name="x" size={12} />
+          </button>
+          <pre>{run.output?.trim() || "(no output)"}</pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -823,9 +910,12 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
     }
   }
 
+  const queue = useStore((s) => (convId ? s.queues[convId] : undefined)) ?? [];
+
+  // While Claude works, sending queues the message; it runs when the current reply ends.
   const submit = async () => {
     const t = text.trim();
-    if (!t || running) return;
+    if (!t) return;
     try {
       const body = attached ? `@${attached} ${t}` : t;
       await sendMessage(body, images.length ? images.map(({ mediaType, data }) => ({ mediaType, data })) : undefined);
@@ -843,6 +933,19 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
   return (
     <div className="composer-dock">
       {children}
+      {queue.length > 0 && (
+        <ol className="queue" aria-label="Queued messages">
+          {queue.map((q, i) => (
+            <li key={q.id}>
+              <span className="queue-n">{i === 0 ? "next" : `+${i}`}</span>
+              <span className="queue-text">{q.text.replace(MENTION, "")}</span>
+              <button className="act-btn" title="Remove from queue" onClick={() => convId && unqueueMessage(convId, q.id)}>
+                <Icon name="x" size={12} />
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
       <div className={`composer ${running ? "is-running" : ""}`}>
         {(images.length > 0 || activeAsset || attachedAsset) && (
           <div className="composer-context">
@@ -872,7 +975,7 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
           ref={ref}
           rows={1}
           value={text}
-          placeholder={running ? "Claude is working. You can type your next message." : "Ask for a model, a UI or a script"}
+          placeholder={running ? "Claude is working. Messages you send now run next." : "Ask for a model, a UI or a script"}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
             if (e.clipboardData.files.length) {
@@ -906,15 +1009,16 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
           )}
           <span className="spacer" />
           <span className="kbd-hint hide-mobile">
-            {running ? <><kbd>esc</kbd> stop</> : <><kbd>enter</kbd> send <kbd>shift+enter</kbd> newline</>}
+            {running ? <><kbd>enter</kbd> queue <kbd>esc</kbd> stop</> : <><kbd>enter</kbd> send <kbd>shift+enter</kbd> newline</>}
           </span>
-          {running ? (
+          {running && (
             <button className="send-btn stop" title="Stop (Esc)" onClick={() => convId && stopConversation(convId)}>
               <span className="stop-square" />
             </button>
-          ) : (
-            <button className="send-btn" title="Send (Enter)" disabled={!text.trim()} onClick={() => void submit()}>
-              <Icon name="arrowUp" size={16} />
+          )}
+          {(!running || text.trim()) && (
+            <button className="send-btn" title={running ? "Queue (Enter): runs after the current reply" : "Send (Enter)"} disabled={!text.trim()} onClick={() => void submit()}>
+              <Icon name={running ? "clock" : "arrowUp"} size={16} />
             </button>
           )}
         </div>

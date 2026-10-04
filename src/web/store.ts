@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, socket } from "./lib/api.ts";
 import type {
   Asset, AssetSummary, ChatMessage, ClaudeStatus, Conversation, ConversationMeta, ConvStatus,
-  HtmlConvertRequest, ImportResult, PermissionRequest, ServerEvent, Settings, StudioStatus,
+  HtmlConvertRequest, ImportResult, PermissionRequest, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
 export type RightTab = "preview" | "assets" | "studio";
@@ -22,6 +22,9 @@ interface State {
   convs: Record<string, Conversation>;
   activeConvId: string | null;
   running: Record<string, ConvStatus>;
+  queues: Record<string, QueuedMessage[]>;
+  /** A reply finished while the tab was in the background (shown in the tab title). */
+  unseenDone: boolean;
   lastError: Record<string, string | undefined>;
   assets: AssetSummary[];
   assetCache: Record<string, Asset>;
@@ -37,6 +40,8 @@ interface State {
   sidebarOpen: boolean;
   settingsOpen: false | "general" | "account" | "studio" | "import" | "advanced";
   htmlImportOpen: boolean;
+  paletteOpen: boolean;
+  shortcutsOpen: boolean;
   composerInsert: { text: string; nonce: number; replace?: boolean } | null;
   importing: Record<string, boolean>;
 }
@@ -49,6 +54,8 @@ export const useStore = create<State>(() => ({
   convs: {},
   activeConvId: null,
   running: {},
+  queues: {},
+  unseenDone: false,
   lastError: {},
   assets: [],
   assetCache: {},
@@ -64,6 +71,8 @@ export const useStore = create<State>(() => ({
   sidebarOpen: true,
   settingsOpen: false,
   htmlImportOpen: false,
+  paletteOpen: false,
+  shortcutsOpen: false,
   composerInsert: null,
   importing: {},
 }));
@@ -98,6 +107,7 @@ function onEvent(e: ServerEvent) {
         studio: s.studio,
         claude: s.claude,
         running: s.running,
+        queues: s.queues ?? {},
         permissions: s.permissions,
         activeAssetId: st.activeAssetId ?? s.assets[0]?.id ?? null,
       }));
@@ -135,9 +145,16 @@ function onEvent(e: ServerEvent) {
         const running = { ...s.running };
         if (e.status === "idle") delete running[e.convId];
         else running[e.convId] = e.status;
-        return { running, lastError: { ...s.lastError, [e.convId]: e.error } };
+        return {
+          running,
+          lastError: { ...s.lastError, [e.convId]: e.error },
+          unseenDone: s.unseenDone || (e.status === "idle" && !!s.running[e.convId] && document.hidden),
+        };
       });
       if (e.error) toast(e.error, "error");
+      break;
+    case "queue":
+      set((s) => ({ queues: { ...s.queues, [e.convId]: e.items } }));
       break;
     case "asset":
       set((s) => {
@@ -201,6 +218,9 @@ function omit<T extends Record<string, unknown>>(o: T, key: string): T {
 }
 
 export function startConnection() {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && get().unseenDone) set({ unseenDone: false });
+  });
   socket.onEvent = onEvent;
   socket.onConnection = (up) => {
     set({ online: up });
@@ -259,6 +279,11 @@ export function stopConversation(id: string) {
   socket.send({ type: "chat.stop", convId: id });
 }
 
+/** Drop a follow-up that hasn't started yet. */
+export function unqueueMessage(convId: string, id: string) {
+  socket.send({ type: "chat.unqueue", convId, id });
+}
+
 export function respondPermission(id: string, allow: boolean, always = false) {
   socket.send({ type: "permission.respond", id, allow, always });
 }
@@ -298,6 +323,30 @@ export async function importAsset(id: string, overrides: Record<string, unknown>
 
 export async function deleteAsset(id: string) {
   await api(`/assets/${id}`, { method: "DELETE" });
+}
+
+/** Make an earlier version current again; the server stores it as a new version. */
+export async function restoreAssetVersion(id: string, version: number) {
+  try {
+    const a = await api<Asset>(`/assets/${id}/restore`, { body: { version } });
+    toast(`Restored v${version} of ${a.name} as v${a.version}`, "success");
+  } catch (err) {
+    toast(String(err), "error");
+  }
+}
+
+/** Download a conversation as Markdown. */
+export async function exportConversation(id: string) {
+  await loadConversation(id);
+  const conv = get().convs[id];
+  if (!conv) return;
+  const { conversationMarkdown } = await import("./lib/export.ts");
+  const blob = new Blob([conversationMarkdown(conv, get().assets)], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${conv.title.replace(/[^\w -]+/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "chat"}.md`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 export async function updateSettings(patch: Partial<Settings>) {

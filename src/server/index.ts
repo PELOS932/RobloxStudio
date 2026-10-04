@@ -81,6 +81,7 @@ function bootState(): BootState {
     studio: bridge.status,
     claude: claude.status,
     running: claude.running(),
+    queues: claude.queues(),
     permissions: forge.pendingPermissions,
   };
 }
@@ -141,6 +142,19 @@ api.post("/assets", (req, res) => {
     asset = { ...base, id: prev?.id ?? shortId("s_"), kind, name: s.name, spec: s };
   } else return void res.status(400).json({ error: "kind must be model, ui or script" });
   res.json(assets.put(asset, true));
+});
+
+api.get("/assets/:id/versions", (req, res) => res.json(assets.versions(String(req.params.id))));
+
+/** Make an earlier version current again (as a new version, so nothing is lost). */
+api.post("/assets/:id/restore", (req, res) => {
+  const id = String(req.params.id);
+  const current = assets.get(id);
+  const old = assets.version(id, Number(req.body?.version));
+  if (!current || !old) return void res.status(404).json({ error: "version not found" });
+  if (old.version === current.version) return void res.json(current);
+  const restored = { ...old, version: current.version + 1, updatedAt: Date.now(), createdAt: current.createdAt, lastImport: current.lastImport } as Asset;
+  res.json(assets.put(restored, true));
 });
 
 api.post("/assets/:id/import", wrap(async (req, res) => {
@@ -307,6 +321,7 @@ wss.on("connection", (ws) => {
       } else if (msg.type === "convert.result") htmlBridge.settle(msg.id, msg);
       else if (msg.type === "chat.send") claude.send(msg.convId, msg.text, msg.images);
       else if (msg.type === "chat.stop") claude.stop(msg.convId);
+      else if (msg.type === "chat.unqueue") claude.unqueue(msg.convId, msg.id);
       else if (msg.type === "permission.respond") forge.resolvePermission(msg.id, msg.allow, msg.always);
     } catch (err) {
       send(ws, { type: "toast", level: "error", message: err instanceof Error ? err.message : String(err) });

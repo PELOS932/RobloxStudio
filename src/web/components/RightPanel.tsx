@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  deleteAsset, importAsset, insertIntoComposer, loadAsset, openAsset, setRightTab, toast, useStore,
+  deleteAsset, importAsset, insertIntoComposer, loadAsset, openAsset, restoreAssetVersion, setRightTab, toast, useStore,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
 import { Icon, KindIcon } from "../lib/icons.tsx";
 import { sizeLabel, type Asset, type AssetSummary } from "../../shared/assets.ts";
+import type { AssetVersion } from "../../shared/protocol.ts";
 import { ModelViewer } from "./ModelViewer.tsx";
 import { UiPreview } from "./UiPreview.tsx";
 import { ScriptView } from "./ScriptView.tsx";
@@ -121,9 +122,8 @@ function AssetBar({ asset }: { asset: AssetSummary }) {
       </span>
       <div className="grow">
         <span className="name">{asset.name}</span>
-        <span className="sub">
-          v{asset.version} · {sizeLabel(asset.kind, asset.size)}
-        </span>
+        <VersionMenu asset={asset} />
+        <span className="sub">{sizeLabel(asset.kind, asset.size)}</span>
         {upToDate && <span className="badge ok hide-mobile" title={asset.lastImport!.path}>In Studio</span>}
       </div>
       <button
@@ -159,6 +159,69 @@ function AssetBar({ asset }: { asset: AssetSummary }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The version label doubles as a menu of earlier versions that can be restored. */
+function VersionMenu({ asset }: { asset: AssetSummary }) {
+  const [open, setOpen] = useState(false);
+  const [versions, setVersions] = useState<AssetVersion[] | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setVersions(null);
+    void api<AssetVersion[]>(`/assets/${asset.id}/versions`).then((v) => alive && setVersions(v)).catch(() => alive && setVersions([]));
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", esc, true);
+    return () => {
+      alive = false;
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", esc, true);
+    };
+  }, [open, asset.id, asset.version]);
+  return (
+    <div className="dropdown version-menu" ref={ref}>
+      <button className={`version-btn ${open ? "open" : ""}`} title="Version history" onClick={() => setOpen((v) => !v)}>
+        v{asset.version}
+        <Icon name="chevronDown" size={11} />
+      </button>
+      {open && (
+        <div className="menu versions">
+          <div className="menu-title">Version history</div>
+          {versions === null && <div className="menu-empty"><span className="spinner" /></div>}
+          {versions?.length === 1 && <div className="menu-empty">No earlier versions yet. Each edit Claude makes is kept here.</div>}
+          {versions?.map((v) => (
+            <div key={v.version} className={`version-row ${v.current ? "current" : ""}`}>
+              <span className="v">v{v.version}</span>
+              <span className="meta">
+                {sizeLabel(asset.kind, v.size)} · {timeAgo(v.updatedAt)}
+                {v.name !== asset.name ? ` · ${v.name}` : ""}
+              </span>
+              {v.current ? (
+                <span className="tag">current</span>
+              ) : (
+                <button
+                  className="btn small ghost"
+                  onClick={() => {
+                    setOpen(false);
+                    void restoreAssetVersion(asset.id, v.version);
+                  }}
+                >
+                  Restore
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

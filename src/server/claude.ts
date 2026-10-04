@@ -16,7 +16,7 @@ import { DATA_DIR, MCP_TOKEN } from "./config.ts";
 import { FORGE_SYSTEM_PROMPT } from "./system-prompt.ts";
 import type { ForgeMcp } from "./forge-mcp.ts";
 import type {
-  Block, ChatMessage, ClaudeStatus, Conversation, ConvStatus, Settings, TurnUsage,
+  Block, ChatMessage, ClaudeStatus, Conversation, ConvStatus, QueuedMessage, Settings, TurnUsage,
 } from "../shared/protocol.ts";
 
 const IDLE_KILL_MS = 20 * 60_000;
@@ -30,6 +30,7 @@ export interface ClaudeDeps {
 }
 
 interface Pending {
+  id?: string;
   text: string;
   images?: { mediaType: string; data: string }[];
 }
@@ -117,9 +118,25 @@ class ClaudeSession {
     }
   }
 
+  /** The visible part of the queue (images stay server-side). */
+  get queued(): QueuedMessage[] {
+    return this.queue.map((q) => ({ id: q.id!, text: q.text }));
+  }
+
+  private emitQueue() {
+    bus.emitEvent({ type: "queue", convId: this.convId, items: this.queued });
+  }
+
+  unqueue(id: string) {
+    const before = this.queue.length;
+    this.queue = this.queue.filter((q) => q.id !== id);
+    if (this.queue.length !== before) this.emitQueue();
+  }
+
   send(p: Pending) {
     if (this.status !== "idle") {
-      this.queue.push(p);
+      this.queue.push({ ...p, id: p.id ?? shortId("q_") });
+      this.emitQueue();
       return;
     }
     const conv = this.conv;
@@ -418,7 +435,10 @@ class ClaudeSession {
     this.setStatus("idle");
     this.touch();
     const next = this.queue.shift();
-    if (next) this.send(next);
+    if (next) {
+      this.emitQueue();
+      this.send(next);
+    }
   }
 
   private fail(message: string) {
@@ -429,13 +449,19 @@ class ClaudeSession {
       this.emitMessage(true);
     }
     this.turn = null;
-    this.queue = [];
+    if (this.queue.length) {
+      this.queue = [];
+      this.emitQueue();
+    }
     if (conv) conversations.save(conv, true);
     this.setStatus("idle", message);
   }
 
   stop() {
-    this.queue = [];
+    if (this.queue.length) {
+      this.queue = [];
+      this.emitQueue();
+    }
     this.deps.forge.cancelPermissions(this.convId);
     if (this.turn) {
       this.turn.msg.interrupted = true;
@@ -483,6 +509,16 @@ export class ClaudeManager {
     let s = this.sessions.get(convId);
     if (!s) this.sessions.set(convId, (s = new ClaudeSession(convId, this.deps)));
     return s;
+  }
+
+  queues(): Record<string, QueuedMessage[]> {
+    const out: Record<string, QueuedMessage[]> = {};
+    for (const [id, s] of this.sessions) if (s.queue.length) out[id] = s.queued;
+    return out;
+  }
+
+  unqueue(convId: string, id: string) {
+    this.sessions.get(convId)?.unqueue(id);
   }
 
   running(): Record<string, ConvStatus> {

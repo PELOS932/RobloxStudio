@@ -5,6 +5,7 @@ import {
 import { Icon } from "../lib/icons.tsx";
 import { MODELS, cacheRate, fmtTokens } from "./Chat.tsx";
 import { highlightLuau } from "./ScriptView.tsx";
+import { MOD } from "./CommandPalette.tsx";
 
 export function TopBar() {
   const claude = useStore((s) => s.claude);
@@ -28,6 +29,12 @@ export function TopBar() {
         <BrandMark />
         Studio Forge
       </div>
+      <span className="topbar-spacer" />
+      <button className="search-btn hide-mobile" onClick={() => useStore.setState({ paletteOpen: true })} title="Search chats, assets and actions">
+        <Icon name="search" size={13} />
+        <span>Search</span>
+        <kbd>{MOD}K</kbd>
+      </button>
       <span className="topbar-spacer" />
       <button className="status-btn" onClick={() => useStore.setState({ settingsOpen: "account" })} title="Claude Code account">
         <i className={`sq ${claudeDot}`} />

@@ -142,6 +142,41 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(tool.result.text.trim()).toBe("2");
   });
 
+  it("queues follow-ups while a reply runs, and lets one be removed", async () => {
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "run some luau" }));
+    // The turn is now blocked on the permission prompt, so these two wait in the queue.
+    const perm = await waitFor("permission", (e) => e.request.convId === conv.id);
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "first follow-up" }));
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "second follow-up" }));
+    const queued = await waitFor("queue", (e) => e.convId === conv.id && e.items.length === 2);
+    expect(queued.items.map((q) => q.text)).toEqual(["first follow-up", "second follow-up"]);
+    expect((await api("/api/state")).body.queues[conv.id]).toHaveLength(2);
+
+    ws.send(JSON.stringify({ type: "chat.unqueue", convId: conv.id, id: queued.items[0].id }));
+    await waitFor("queue", (e) => e.convId === conv.id && e.items.length === 1 && e.items[0].text === "second follow-up");
+    ws.send(JSON.stringify({ type: "permission.respond", id: perm.request.id, allow: true }));
+    await waitFor("queue", (e) => e.convId === conv.id && e.items.length === 0);
+    await waitFor("message", (e) => e.convId === conv.id && e.message.blocks.some((b) => b.type === "text" && b.text === "Echo: second follow-up"));
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && !events.some((x) => x.type === "queue" && x.convId === conv.id && x.items.length > 0 && events.indexOf(x) > events.indexOf(e)));
+
+    const full = (await api(`/api/conversations/${conv.id}`)).body;
+    const userTexts = full.messages.filter((m: { role: string }) => m.role === "user").map((m: { blocks: { text: string }[] }) => m.blocks[0].text);
+    expect(userTexts).toEqual(["run some luau", "second follow-up"]);
+  });
+
+  it("keeps earlier asset versions and restores one as a new version", async () => {
+    const v1 = (await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", spec: { name: "Greeter", kind: "Script", source: "print('v1')" } }) })).body;
+    await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", replaceId: v1.id, spec: { name: "Greeter", kind: "Script", source: "print('v2')\nprint('more')" } }) });
+    const versions = (await api(`/api/assets/${v1.id}/versions`)).body;
+    expect(versions.map((v: { version: number; current: boolean; size: number }) => [v.version, v.current, v.size])).toEqual([[2, true, 2], [1, false, 1]]);
+
+    const restored = (await api(`/api/assets/${v1.id}/restore`, { method: "POST", body: JSON.stringify({ version: 1 }) })).body;
+    expect(restored).toMatchObject({ version: 3, spec: { source: "print('v1')" } });
+    expect((await api(`/api/assets/${v1.id}/versions`)).body.map((v: { version: number }) => v.version)).toEqual([3, 2, 1]);
+    expect((await api(`/api/assets/${v1.id}/restore`, { method: "POST", body: JSON.stringify({ version: 9 }) })).status).toBe(404);
+  });
+
   it("runs Luau from the Studio console endpoint", async () => {
     const r = (await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: "return #workspace:GetChildren()" }) })).body;
     expect(r).toMatchObject({ ok: true });
