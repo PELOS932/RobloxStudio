@@ -804,3 +804,18 @@ export function terrainLuau(ops: TerrainOp[]): string {
 	end
 	return table.concat(report, "\\n")`, "Forge: terrain");
 }
+
+// ---------------------------------------------------------------------------
+// studio_undo
+
+export function undoLuau(steps: number, redo = false): string {
+  return `local history = game:GetService("ChangeHistoryService")
+local done = 0
+for _ = 1, ${Math.max(1, Math.min(20, Math.round(steps)))} do
+	local ok = pcall(function() history:${redo ? "Redo" : "Undo"}() end)
+	if not ok then break end
+	done += 1
+end
+return "${redo ? "Redid" : "Undid"} " .. done .. " step" .. (if done == 1 then "" else "s")
+`;
+}

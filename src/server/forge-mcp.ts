@@ -23,7 +23,7 @@ import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from 
 import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
 import { applyVfxEdit, sanitizeVfxSpec, VfxEditSchema, VfxSpecSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
 import { scriptsToLuau } from "../shared/to-luau.ts";
-import { editLuau, LIGHTING_PRESETS, lightingLuau, queryLuau, scriptSearchLuau, terrainLuau, type EditOp, type TerrainOp } from "../shared/studio-ops.ts";
+import { editLuau, LIGHTING_PRESETS, lightingLuau, queryLuau, scriptSearchLuau, terrainLuau, undoLuau, type EditOp, type TerrainOp } from "../shared/studio-ops.ts";
 import { ID_PREFIX, sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
@@ -571,6 +571,12 @@ export class ForgeMcp {
         }),
         advertise: (s) => looseItems(s, { ops: "[{op: set|create|delete|clone|move|select, ...fields as described}]" }),
         run: async ({ ops }, ctx) => this.job(editLuau(ops as EditOp[]), ctx, `Applying ${ops.length} change${ops.length > 1 ? "s" : ""}`),
+      },
+      {
+        name: "studio_undo",
+        description: "Undo (or redo) the last changes in Studio, like Ctrl+Z. Each create/import/studio_edit call is one step.",
+        schema: z.object({ steps: z.number().int().min(1).max(20).optional(), redo: z.boolean().optional() }),
+        run: async ({ steps, redo }, ctx) => this.job(undoLuau(steps ?? 1, !!redo), ctx, redo ? "Redoing" : "Undoing"),
       },
       {
         name: "studio_scripts",

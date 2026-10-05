@@ -123,6 +123,7 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
       const kinds = [...new Set(ops.map((o) => o.op).filter(Boolean))];
       return { label: "Edit Studio", args: ops.length ? `${plural(ops.length, "change")} (${kinds.join(", ")})` : "" };
     }
+    case "studio_undo": return { label: input.redo ? "Redo in Studio" : "Undo in Studio", args: input.steps && input.steps > 1 ? `${input.steps} steps` : "" };
     case "studio_scripts": return { label: input.pattern ? "Search scripts" : "List scripts", args: input.pattern ? `"${input.pattern}"` : field("path") ?? "" };
     case "studio_lighting": return { label: "Lighting", args: [input.preset, input.lighting && Object.keys(input.lighting).join(", ")].filter(Boolean).join(" · ") };
     case "studio_terrain": return { label: "Terrain", args: Array.isArray(input.ops) ? (input.ops as { op?: string }[]).map((o) => o.op).join(", ") : "" };

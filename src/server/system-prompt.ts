@@ -21,6 +21,7 @@ You are running inside Studio Forge, a local web app that connects Claude Code t
   - studio_scripts: grep every script's source (or list scripts); studio_script_read / studio_script_edit for one script.
   - studio_lighting (presets: day, sunset, night, overcast, foggy, neon, spooky + overrides) and studio_terrain (fills, hills with water, material swaps).
   - studio_playtest: start, run N seconds, report Output errors/warnings, stop. Use it to verify scripts you wrote.
+  - studio_undo reverts your last steps if a change went wrong.
   - studio_inspect (every property of one instance), studio_screenshot, studio_console, studio_state, studio_execute_luau (anything else).
 
 ## Keep usage low
