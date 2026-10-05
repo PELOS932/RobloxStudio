@@ -1,31 +1,49 @@
 // three.js meshes for the R6/R15 dummy rigs, posed from shared/animation.ts forward kinematics.
+// They look like Studio's Rig Builder dummies: grey, softly rounded parts, a rounded-cube head,
+// the classic smile on R6 and the block rig's neutral face on R15.
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { Rig } from "../../shared/animation.ts";
 import type { Mat3, Vec3 } from "../../shared/math.ts";
 
-let faceTexture: THREE.CanvasTexture | null = null;
+const faces = new Map<string, THREE.CanvasTexture>();
 
-/** The classic smiley face. */
-function face(): THREE.CanvasTexture {
-  if (faceTexture) return faceTexture;
+/** "smile" (R6's classic face) or "neutral" (two dot eyes and a flat mouth, R15 block rig). */
+function face(kind: "smile" | "neutral"): THREE.CanvasTexture {
+  const hit = faces.get(kind);
+  if (hit) return hit;
   const c = document.createElement("canvas");
-  c.width = c.height = 128;
+  c.width = c.height = 256;
   const g = c.getContext("2d")!;
-  g.fillStyle = "#1a1a1a";
-  for (const x of [44, 84]) {
-    g.beginPath();
-    g.ellipse(x, 50, 7, 13, 0, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.strokeStyle = "#1a1a1a";
-  g.lineWidth = 7;
+  g.fillStyle = g.strokeStyle = "#1a1a1a";
   g.lineCap = "round";
-  g.beginPath();
-  g.arc(64, 64, 30, Math.PI * 0.2, Math.PI * 0.8);
-  g.stroke();
-  faceTexture = new THREE.CanvasTexture(c);
-  faceTexture.colorSpace = THREE.SRGBColorSpace;
-  return faceTexture;
+  if (kind === "smile") {
+    for (const x of [92, 164]) {
+      g.beginPath();
+      g.ellipse(x, 100, 14, 26, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.lineWidth = 13;
+    g.beginPath();
+    g.arc(128, 124, 58, Math.PI * 0.2, Math.PI * 0.8);
+    g.stroke();
+  } else {
+    for (const x of [98, 158]) {
+      g.beginPath();
+      g.ellipse(x, 104, 10, 18, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.lineWidth = 9;
+    g.beginPath();
+    g.moveTo(108, 168);
+    g.lineTo(148, 168);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  faces.set(kind, tex);
+  return tex;
 }
 
 export interface RigMeshes {
@@ -39,32 +57,43 @@ export function buildRig(rig: Rig): RigMeshes {
   const parts = new Map<string, THREE.Object3D>();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
+  const shared = new Map<string, THREE.MeshStandardMaterial>();
+  const material = (color: string) => {
+    let m = shared.get(color);
+    if (!m) {
+      m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.72, metalness: 0 });
+      shared.set(color, m);
+      materials.push(m);
+    }
+    return m;
+  };
   for (const p of rig.parts) {
     if (p.hidden) continue;
     const holder = new THREE.Group();
     holder.matrixAutoUpdate = false;
-    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color), roughness: 0.6, metalness: 0 });
-    materials.push(mat);
     let mesh: THREE.Mesh;
     if (p.name === "Head") {
-      // Roblox's head mesh at scale 1.25: a slightly rounded cylinder.
-      const geo = new THREE.CylinderGeometry(0.62, 0.62, 1.2, 28, 1);
+      // R6's classic head (mesh at scale 1.25) and the block rig's cube head are both ~1.2 studs.
+      const r6 = rig.type === "R6";
+      const s = 1.2;
+      const geo = new RoundedBoxGeometry(s, s, s, 4, r6 ? 0.34 : 0.2);
       geometries.push(geo);
-      mesh = new THREE.Mesh(geo, mat);
-      const decalGeo = new THREE.PlaneGeometry(0.9, 0.9);
+      mesh = new THREE.Mesh(geo, material(p.color));
+      const decalGeo = new THREE.PlaneGeometry(s * 0.82, s * 0.82);
       geometries.push(decalGeo);
-      const decalMat = new THREE.MeshBasicMaterial({ map: face(), transparent: true, depthWrite: false });
+      const decalMat = new THREE.MeshStandardMaterial({ map: face(r6 ? "smile" : "neutral"), transparent: true, depthWrite: false, roughness: 0.8 });
       materials.push(decalMat);
       const decal = new THREE.Mesh(decalGeo, decalMat);
-      // Characters face -Z; the decal sits on the front of the head, facing out.
-      decal.position.set(0, 0, -0.625);
+      // Characters face -Z; the face sits on the front of the head, facing out.
+      decal.position.set(0, 0, -s / 2 - 0.004);
       decal.rotation.y = Math.PI;
       mesh.add(decal);
     } else {
-      // Slightly inset boxes read better than touching ones.
-      const geo = new THREE.BoxGeometry(p.size[0] * 0.98, p.size[1] * 0.98, p.size[2] * 0.98);
+      // Slightly inset, softly rounded blocks read like Roblox parts without z-fighting at joints.
+      const [x, y, z] = p.size;
+      const geo = new RoundedBoxGeometry(x * 0.985, y * 0.985, z * 0.985, 2, Math.min(0.1, Math.min(x, y, z) * 0.18));
       geometries.push(geo);
-      mesh = new THREE.Mesh(geo, mat);
+      mesh = new THREE.Mesh(geo, material(p.color));
     }
     mesh.castShadow = true;
     mesh.receiveShadow = true;

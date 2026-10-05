@@ -112,7 +112,8 @@ export interface Rig {
   joints: RigJoint[];
 }
 
-const HEAD = "#f5cd30", TORSO = "#0d69ac", LEGS = "#a4bd47";
+// Roblox's default rig colour (Medium stone grey), like the dummies Studio's Rig Builder makes.
+const HEAD = "#a3a2a5", TORSO = "#a3a2a5", LEGS = "#a3a2a5";
 
 const R6_ROOT_Q: Mat3 = [-1, 0, 0, 0, 0, 1, 0, 1, 0];
 const R6_RIGHT_Q: Mat3 = [0, 0, 1, 0, 1, 0, -1, 0, 0];
@@ -144,7 +145,8 @@ function r15(): Rig {
     { name: "HumanoidRootPart", size: [2, 2, 1], center: [0, 2.921, 0], color: TORSO, hidden: true },
     { name: "LowerTorso", size: [2, 0.4, 1], center: [0, 2.121, 0], color: TORSO },
     { name: "UpperTorso", size: [2, 1.6, 1], center: [0, 3.121, 0], color: TORSO },
-    { name: "Head", size: [2, 1, 1], center: [0, 4.421, 0], color: HEAD },
+    // The block rig's cube head.
+    { name: "Head", size: [1.2, 1.2, 1.2], center: [0, 4.421, 0], color: HEAD },
   ];
   const joints: RigJoint[] = [
     { joint: "root", motor: "Root", part0: "HumanoidRootPart", part1: "LowerTorso", pivot: [0, 1.921, 0], q: IDENTITY },

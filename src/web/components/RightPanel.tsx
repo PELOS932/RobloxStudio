@@ -1,24 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   importAsset, insertIntoComposer, loadAsset, restoreAssetVersion, setRightTab, toast, useStore,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
 import { Icon, KindIcon } from "../lib/icons.tsx";
-import { sizeLabel, type Asset, type AssetSummary } from "../../shared/assets.ts";
+import { LIBRARY_KINDS, sizeLabel, type Asset, type AssetSummary } from "../../shared/assets.ts";
 import type { AssetVersion } from "../../shared/protocol.ts";
 import { ModelViewer } from "./ModelViewer.tsx";
 import { UiPreview } from "./UiPreview.tsx";
 import { ScriptView } from "./ScriptView.tsx";
 import { StudioPanel } from "./StudioPanel.tsx";
 import { PlacePanel } from "./PlacePanel.tsx";
-import { AnimatePanel } from "./AnimatePanel.tsx";
 import { AnimationViewer } from "./AnimationViewer.tsx";
+import { VfxViewer } from "./VfxViewer.tsx";
+import { AssetThumb } from "./AssetThumb.tsx";
 import { HtmlSourceView, retranslate } from "./HtmlTools.tsx";
 import { Library, timeAgo } from "./Library.tsx";
 
 export function RightPanel() {
   const tab = useStore((s) => s.rightTab);
-  const assets = useStore((s) => s.assets);
+  const libraryCount = useStore((s) => s.assets.filter((a) => (LIBRARY_KINDS as readonly string[]).includes(a.kind)).length);
   const studio = useStore((s) => s.studio);
   return (
     <section className="panel">
@@ -27,10 +28,7 @@ export function RightPanel() {
           <Icon name="eye" /> <span className="tab-label">Preview</span>
         </button>
         <button className={`tab ${tab === "assets" ? "active" : ""}`} onClick={() => setRightTab("assets")}>
-          <Icon name="grid" /> <span className="tab-label">Library</span> <span className="count">{assets.length}</span>
-        </button>
-        <button className={`tab ${tab === "animate" ? "active" : ""}`} onClick={() => setRightTab("animate")} title="Animations on R15 or R6 rigs, played live">
-          <Icon name="anim" /> <span className="tab-label">Animate</span>
+          <Icon name="grid" /> <span className="tab-label">Library</span> <span className="count">{libraryCount}</span>
         </button>
         <button className={`tab ${tab === "place" ? "active" : ""}`} onClick={() => setRightTab("place")} title="Browse the open Studio place: Explorer, map, UIs and scripts">
           <Icon name="map" /> <span className="tab-label">Place</span>
@@ -42,7 +40,6 @@ export function RightPanel() {
       <div className="panel-body">
         {tab === "preview" && <PreviewPane />}
         {tab === "assets" && <Library />}
-        {tab === "animate" && <AnimatePanel />}
         {tab === "place" && <PlacePanel />}
         {tab === "studio" && <StudioPanel />}
       </div>
@@ -75,7 +72,8 @@ function PreviewPane() {
         <div className="stage-empty">
           <div>
             <div className="big">Nothing to preview yet</div>
-            <div>Models, UIs and scripts open here as soon as Claude makes them.</div>
+            <div>Models and UIs open here as soon as Claude makes them; animations and effects play in the Library.</div>
+            <RecentDesigns />
           </div>
         </div>
       </div>
@@ -108,8 +106,53 @@ function PreviewPane() {
         {asset?.kind === "ui" && (htmlAsset && view === "html" ? <HtmlSourceView asset={htmlAsset} /> : <UiPreview spec={asset.spec} onReference={reference} />)}
         {asset?.kind === "script" && <ScriptView source={asset.spec.source} />}
         {asset?.kind === "animation" && <AnimationViewer spec={asset.spec} />}
+        {asset?.kind === "vfx" && <VfxViewer spec={asset.spec} />}
       </div>
     </>
+  );
+}
+
+/** The latest models and UIs, so earlier UI designs stay one click away. */
+function RecentDesigns({ compact = false, onPick }: { compact?: boolean; onPick?: () => void }) {
+  const assets = useStore((s) => s.assets);
+  const recent = useMemo(() => assets.filter((a) => a.kind === "model" || a.kind === "ui").slice(0, compact ? 12 : 6), [assets, compact]);
+  if (!recent.length) return null;
+  return (
+    <div className={compact ? "recent-list" : "recent-grid"}>
+      {recent.map((a) => (
+        <button key={a.id} className="recent-item" onClick={() => (useStore.setState({ activeAssetId: a.id }), onPick?.())} title={a.name}>
+          <AssetThumb id={a.id} kind={a.kind} version={a.version} width={compact ? 48 : 96} height={compact ? 30 : 60} thumb={a.thumb} />
+          <span>
+            <b>{a.name}</b>
+            <small>{a.kind === "ui" ? (a.fromHtml ? "UI · HTML" : "UI") : "Model"} · {timeAgo(a.updatedAt)}</small>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RecentMenu() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div className="dropdown" ref={ref}>
+      <button className={`btn ${open ? "active" : ""}`} title="Recent models and UIs" onClick={() => setOpen((v) => !v)}>
+        <Icon name="clock" />
+      </button>
+      {open && (
+        <div className="menu recent-menu">
+          <div className="menu-title">Recent models and UIs</div>
+          <RecentDesigns compact onPick={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -148,6 +191,7 @@ function AssetBar({ asset }: { asset: AssetSummary }) {
         <span className="long">{importing ? "Importing…" : asset.lastImport ? "Update in Studio" : "Import to Studio"}</span>
         <span className="short">{importing ? "Importing…" : asset.lastImport ? "Update" : "Import"}</span>
       </button>
+      <RecentMenu />
       {asset.kind === "ui" && (
         <a className="btn" href={`/?render=${asset.id}`} target="_blank" rel="noreferrer" title="Open full size in a new tab">
           <Icon name="eye" />

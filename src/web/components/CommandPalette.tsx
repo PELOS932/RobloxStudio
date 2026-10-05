@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  compactConversation, exportConversation, importAsset, openAsset, openConversation, startNewChat, stopConversation, toast, updateSettings, useStore,
+  compactConversation, exportConversation, importAsset, setLibraryTab, openAsset, openConversation, startNewChat, stopConversation, toast, updateSettings, useStore,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
 import { openScene } from "../lib/place.ts";
@@ -17,7 +17,7 @@ interface Item {
   /** Extra words that should match (not shown). */
   keywords?: string;
   icon?: IconName;
-  kind?: "model" | "ui" | "script" | "animation";
+  kind?: "model" | "ui" | "script" | "animation" | "vfx";
   run: () => void;
 }
 
@@ -96,7 +96,8 @@ function Palette() {
     for (const g of games) {
       act(`game-${g.id}`, `Library: ${g.name}`, "map", () => useStore.setState({ rightTab: "assets", mobileView: "panel", libraryGame: g.id }), undefined, "game place assets models");
     }
-    act("tab-animate", "Open animations", "anim", () => useStore.setState({ rightTab: "animate", mobileView: "panel" }), undefined, "animate r6 r15 rig keyframes dance walk");
+    act("tab-animate", "Open animations", "anim", () => (setLibraryTab("animations"), useStore.setState({ mobileView: "panel" })), undefined, "animate r6 r15 rig keyframes dance walk");
+    act("tab-vfx", "Open effects (VFX)", "flame", () => (setLibraryTab("vfx"), useStore.setState({ mobileView: "panel" })), undefined, "vfx particles effects fire smoke beam trail");
     act("tab-place", "Browse the Studio place", "map", () => useStore.setState({ rightTab: "place", mobileView: "panel" }), undefined, "explorer workspace tree scripts gui");
     if (studioReady) {
       act("place-map", "View the whole map in 3D", "map", () => {
@@ -124,6 +125,7 @@ function Palette() {
       out.push({ id: `chat-${c.id}`, group: "Chats", label: c.title, hint: timeAgo(c.updatedAt), icon: "message", run: () => void openConversation(c.id) });
     }
     for (const a of assets) {
+      if (a.kind === "script") continue;
       out.push({
         id: `asset-${a.id}`, group: "Assets", label: a.name, kind: a.kind,
         hint: `${a.kind} · ${sizeLabel(a.kind, a.size)}${a.gameId ? ` · ${games.find((g) => g.id === a.gameId)?.name ?? ""}` : ""}`,

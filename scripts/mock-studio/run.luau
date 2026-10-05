@@ -86,6 +86,11 @@ local env = setmetatable({
 	NumberSequence = roblox.NumberSequence, NumberSequenceKeypoint = roblox.NumberSequenceKeypoint,
 }, { __index = getfenv(1) })
 
+-- Every other Roblox datatype Lune knows (NumberRange, BrickColor, Region3, …).
+for name, value in roblox do
+	if string.match(name, "^%u") and rawget(env, name) == nil then rawset(env, name, value) end
+end
+
 local ok, result = pcall(function()
 	return luau.load(fs.readFile(codeFile), { debugName = "CommandExecution", environment = env })()
 end)

@@ -92,7 +92,18 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
     case "create_ui": return { label: "Create UI", args: [field("name"), count(input.nodes) ? plural(count(input.nodes), "node") : ""].filter(Boolean).join(" · ") };
     case "create_ui_html": return { label: "Create UI from HTML", args: [field("name"), input.width ? `${input.width}×${input.height ?? 720}` : ""].filter(Boolean).join(" · ") };
     case "edit_ui_html": return { label: "Edit UI HTML", args: [asset(field("id")), count(input.edits) ? plural(count(input.edits), "edit") : ""].filter(Boolean).join(" · ") };
-    case "create_script": return { label: "Create script", args: [field("name"), input.kind].filter(Boolean).join(" · ") };
+    case "create_script": return count(input.scripts)
+      ? { label: "Write scripts", args: (input.scripts as { name?: string }[]).map((x) => x.name).filter(Boolean).join(", ") }
+      : { label: "Write script", args: [field("name"), input.kind, input.parent].filter(Boolean).join(" · ") };
+    case "create_vfx": return { label: "Create effect", args: [field("name"), count(input.emitters) ? plural(count(input.emitters), "emitter") : ""].filter(Boolean).join(" · ") };
+    case "edit_vfx": {
+      const bits = [asset(field("id"))];
+      if (count(input.add)) bits.push(`+${count(input.add)}`);
+      if (count(input.update)) bits.push(`~${count(input.update)}`);
+      if (count(input.remove)) bits.push(`−${count(input.remove)}`);
+      if (input.scale) bits.push(`×${input.scale}`);
+      return { label: "Edit effect", args: bits.filter(Boolean).join(" ") };
+    }
     case "create_animation": return { label: "Create animation", args: [field("name"), input.rig, count(input.keyframes) ? plural(count(input.keyframes), "keyframe") : ""].filter(Boolean).join(" · ") };
     case "edit_animation": {
       const bits = [asset(field("id"))];
@@ -106,7 +117,16 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
     case "import_to_studio": return { label: "Import to Studio", args: [asset(field("id")), input.parent].filter(Boolean).join(" → ") };
     case "studio_pull_selection": return { label: "Pull Studio selection", args: "" };
     case "studio_execute_luau": return { label: "Run Luau", args: oneLine((field("code") ?? "").split("\n").find((l: string) => l.trim() && !l.trim().startsWith("--")) ?? "", 70) };
-    case "studio_search_tree": return { label: "Search tree", args: [input.path, input.instance_type, input.keywords && `"${input.keywords}"`].filter(Boolean).join(" ") };
+    case "studio_query": return { label: input.tree ? "Explorer outline" : "Find in Studio", args: [input.path, input.class, input.name && `"${input.name}"`, input.tag && `#${input.tag}`].filter(Boolean).join(" ") };
+    case "studio_edit": {
+      const ops = Array.isArray(input.ops) ? (input.ops as { op?: string }[]) : [];
+      const kinds = [...new Set(ops.map((o) => o.op).filter(Boolean))];
+      return { label: "Edit Studio", args: ops.length ? `${plural(ops.length, "change")} (${kinds.join(", ")})` : "" };
+    }
+    case "studio_scripts": return { label: input.pattern ? "Search scripts" : "List scripts", args: input.pattern ? `"${input.pattern}"` : field("path") ?? "" };
+    case "studio_lighting": return { label: "Lighting", args: [input.preset, input.lighting && Object.keys(input.lighting).join(", ")].filter(Boolean).join(" · ") };
+    case "studio_terrain": return { label: "Terrain", args: Array.isArray(input.ops) ? (input.ops as { op?: string }[]).map((o) => o.op).join(", ") : "" };
+    case "studio_playtest": return { label: input.mode === "stop" ? "Stop play-test" : input.mode === "start" ? "Start play-test" : "Play-test", args: input.mode && input.mode !== "test" ? "" : `${input.seconds ?? 5}s` };
     case "studio_inspect": return { label: "Inspect", args: field("path") ?? "" };
     case "studio_script_read": return { label: "Read script", args: field("path") ?? "" };
     case "studio_script_edit": return { label: "Edit script", args: [field("path"), count(input.edits) ? plural(count(input.edits), "edit") : ""].filter(Boolean).join(" · ") };
@@ -114,6 +134,7 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
     case "studio_console": return { label: "Read Studio output", args: "" };
     case "studio_state": return { label: "Studio state", args: "" };
     case "studio_play": return { label: input.start === false ? "Stop play-test" : "Play-test", args: "" };
+    case "studio_search_tree": return { label: "Search tree", args: [input.path, input.instance_type, input.keywords && `"${input.keywords}"`].filter(Boolean).join(" ") };
     // Claude Code's own tools (Full Claude Code mode).
     case "Bash": return { label: "Bash", args: oneLine(field("command"), 100) };
     case "Read": return { label: "Read", args: [shortPath(field("file_path")), input.offset ? `from line ${input.offset}` : ""].filter(Boolean).join(" ") };

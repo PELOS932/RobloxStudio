@@ -74,6 +74,6 @@ export function Icon({ name, size = 16, ...rest }: { name: IconName; size?: numb
   );
 }
 
-export function KindIcon({ kind, size = 15 }: { kind: "model" | "ui" | "script" | "animation"; size?: number }) {
-  return <Icon name={kind === "model" ? "cube" : kind === "ui" ? "layout" : kind === "animation" ? "anim" : "code"} size={size} />;
+export function KindIcon({ kind, size = 15 }: { kind: "model" | "ui" | "script" | "animation" | "vfx"; size?: number }) {
+  return <Icon name={kind === "model" ? "cube" : kind === "ui" ? "layout" : kind === "animation" ? "anim" : kind === "vfx" ? "flame" : "code"} size={size} />;
 }

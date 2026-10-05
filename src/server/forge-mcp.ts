@@ -21,7 +21,10 @@ import { ScriptSpecSchema } from "../shared/script.ts";
 import { checkModel, describeIssues } from "../shared/diagnostics.ts";
 import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from "../shared/compact.ts";
 import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
-import { sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
+import { applyVfxEdit, sanitizeVfxSpec, VfxEditSchema, VfxSpecSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
+import { scriptsToLuau } from "../shared/to-luau.ts";
+import { editLuau, LIGHTING_PRESETS, lightingLuau, queryLuau, scriptSearchLuau, terrainLuau, type EditOp, type TerrainOp } from "../shared/studio-ops.ts";
+import { ID_PREFIX, sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
@@ -197,7 +200,9 @@ export class ForgeMcp {
   // -------------------------------------------------------------------------
 
   private async afterSave(asset: Asset, verb: string, ctx: Ctx, warnings: string[] = []): Promise<ToolResult> {
-    const extra = asset.kind === "animation" ? `, ${asset.spec.rig}, ${Math.round(animationLength(asset.spec) * 100) / 100}s` : dims(asset);
+    const extra = asset.kind === "animation"
+      ? `, ${asset.spec.rig}, ${Math.round(animationLength(asset.spec) * 100) / 100}s`
+      : asset.kind === "vfx" ? `: ${vfxSummary(asset.spec)}` : dims(asset);
     const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${extra}). Shown in the preview.`];
     if (warnings.length) lines.push(`Notes: ${warnings.slice(0, 8).join("; ")}`);
     // Positioning problems Claude can fix before the user notices (floating parts, flicker…).
@@ -215,7 +220,7 @@ export class ForgeMcp {
     const prev = replaceId ? assets.get(replaceId) : undefined;
     if (replaceId && (!prev || prev.kind !== kind)) throw new Error(`No ${kind} asset with id ${replaceId}.`);
     const asset = {
-      id: prev?.id ?? shortId(kind === "model" ? "m_" : kind === "ui" ? "u_" : kind === "animation" ? "a_" : "s_"),
+      id: prev?.id ?? shortId(ID_PREFIX[kind]),
       kind,
       name: spec.name,
       description: (spec as { description?: string }).description,
@@ -238,6 +243,13 @@ export class ForgeMcp {
 
   private studio(name: string, args: Record<string, unknown>, timeoutMs?: number) {
     return this.deps.bridge.callTool(name, args, timeoutMs).then(forward);
+  }
+
+  /** Run one generated Luau job in Studio and return its text result. */
+  private async job(code: string, ctx: Ctx, what: string): Promise<ToolResult> {
+    ctx.progress(`${what} in Studio…`);
+    const out = unquote(await this.deps.bridge.runLuau(code));
+    return text(clip(out || "nil"), out.startsWith("error:"));
   }
 
   private requireBuiltin(feature: string) {
@@ -389,9 +401,54 @@ export class ForgeMcp {
       },
       {
         name: "create_script",
-        description: "Create (or replace, with id) a Script/LocalScript/ModuleScript that is inserted at a path in the place.",
-        schema: ScriptSpecSchema.extend({ id: id.optional().describe("replace this existing script") }),
-        run: async ({ id: replaceId, ...spec }, ctx) => this.afterSave(this.save("script", spec, replaceId), replaceId ? "Replaced" : "Created", ctx),
+        description:
+          "Write Script/LocalScript/ModuleScript(s) straight into Studio (not kept in the library). A script with the same name under the same parent is updated in place. Pass scripts to write several in one call.",
+        schema: ScriptSpecSchema.partial().omit({ description: true }).extend({
+          scripts: z.array(ScriptSpecSchema.omit({ description: true })).max(30).optional().describe("several scripts at once"),
+        }),
+        advertise: (s) => looseItems(s, { scripts: "[{name, kind, parent?, source}] like the single-script fields" }),
+        run: async ({ scripts, ...one }, ctx) => {
+          const list = [...(scripts ?? [])];
+          if (one.name && one.kind && one.source !== undefined) list.push({ name: one.name, kind: one.kind, parent: one.parent, source: one.source });
+          if (!list.length) return text("Give name, kind and source (or scripts).", true);
+          ctx.progress(`Writing ${list.length} script${list.length > 1 ? "s" : ""} into Studio…`);
+          type Written = { path: string; class: string; lines: number; updated: boolean };
+          const r = await this.deps.bridge.runLuauJson<{ ok: boolean; error?: string; scripts?: Written[] | Record<string, Written> }>(scriptsToLuau(list).code);
+          if (!r.ok) return text(`Studio: ${r.error}`, true);
+          // forgeJson writes arrays as {"1": …}.
+          const items: Written[] = Array.isArray(r.scripts) ? r.scripts : Object.values(r.scripts ?? {});
+          return text(items.map((x) => `${x.updated ? "Updated" : "Created"} ${x.class} ${x.path} (${x.lines} lines)`).join("\n"));
+        },
+      },
+      {
+        name: "create_vfx",
+        description:
+          "Create (or replace, with id) a visual effect: particle emitters, beams, trails, fire, smoke, sparkles and lights around one root. Previews live in the browser; importing builds a Model (inside a BasePart parent it is welded on). One-shots: rate 0 + burst; play with require(effect.Play)().",
+        schema: VfxSpecSchema.extend({ id: id.optional().describe("replace this existing effect") }),
+        advertise: (s) => looseItems(s, {
+          emitters: `[{name, type: particles|beam|trail|light|fire|smoke|sparkles, pos?: [x,y,z] studs from the root (y up)}]. particles: texture (${TEXTURE_PRESETS.join("|")} or rbxassetid://), color ("#hex" | ["#a","#b"] | [[t,"#hex"],…]), size/transparency/squash (n | [from,to] | [[t,v,env?],…]), lifetime/speed/rotation/spin ([min,max] or n), rate, burst, delay, spread (deg), direction (up|down|left|right|front|back), accel [x,y,z], drag, lightEmission 0..1, brightness, orientation (camera|cameraUp|velocity|velocityPerp), shape (box|sphere|cylinder|disc) + shapeSize + surface/inward, flipbook {grid,mode,fps}, locked, zOffset. beam: from, to, width ([w0,w1]), curve [c0,c1], color, transparency, texture, textureLength, textureSpeed, textureMode, segments, faceCamera. trail: from, to (attachment offsets), lifetime, color, transparency, widthScale. light: kind point|spot, color, brightness, range, angle, face. fire: color, secondaryColor, heat, size. smoke: color, opacity, riseVelocity, size. sparkles: color.`,
+        }),
+        run: async ({ id: replaceId, ...raw }, ctx) => {
+          const spec = sanitizeVfxSpec(raw);
+          const asset = this.save("vfx", spec, replaceId);
+          return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx);
+        },
+      },
+      {
+        name: "edit_vfx",
+        description: "Change an effect: update emitters by name (only listed fields; null removes one; rename with rename), add or remove emitters, scale everything, or change the preview motion.",
+        schema: VfxEditSchema.extend({ id }),
+        advertise: (s) => looseItems(s, {
+          add: "new emitters, same format as create_vfx",
+          update: "[{name, ...fields to change}]",
+        }),
+        run: async ({ id: assetId, ...edit }, ctx) => {
+          const prev = assets.get(assetId);
+          if (!prev || prev.kind !== "vfx") return text(`No effect with id ${assetId}.`, true);
+          const { spec, missing } = applyVfxEdit(prev.spec, edit);
+          const asset = this.save("vfx", spec, assetId);
+          return this.afterSave(asset, "Edited", ctx, missing.length ? [`not found: ${missing.join(", ")}`] : []);
+        },
       },
       {
         name: "list_assets",
@@ -402,7 +459,8 @@ export class ForgeMcp {
         }),
         run: async ({ all, query }) => {
           const current = games.get(games.currentId);
-          const everything = assets.list();
+          // Older script assets stay on disk but aren't part of the library anymore.
+          const everything = assets.list().filter((a) => a.kind !== "script");
           let list = all || !current ? everything : everything.filter((a) => !a.gameId || a.gameId === current.id);
           if (query) {
             const q = query.toLowerCase();
@@ -451,10 +509,10 @@ export class ForgeMcp {
       },
       {
         name: "import_to_studio",
-        description: "Import an asset into the open Roblox Studio place. Re-importing replaces the previous copy in place.",
+        description: "Import an asset into the open Roblox Studio place. Re-importing replaces the previous copy in place. Effects (vfx) imported with a BasePart parent are welded to it and follow it.",
         schema: z.object({
           id,
-          parent: z.string().optional().describe("dot path, e.g. Workspace, ReplicatedStorage, StarterGui"),
+          parent: z.string().optional().describe("dot path, e.g. Workspace, ReplicatedStorage, StarterGui; effects: a part path or @selection to attach"),
           placement: z.enum(["camera", "origin", "keep"]).optional().describe("models: in front of camera (default), at origin, or spec coordinates"),
           optimize: z.boolean().optional().describe("merge identical touching blocks (default true)"),
         }),
@@ -488,19 +546,72 @@ export class ForgeMcp {
         },
       },
       {
-        name: "studio_search_tree",
-        description: "Search the Studio instance tree (by path, class, keywords).",
+        name: "studio_query",
+        description:
+          "Find instances in Studio and read properties in one call. Filters: path (root, default Workspace), class (IsA), name (substring, or Lua pattern), tag, attr, depth. props lists properties to show (also Pivot, Tags, Attributes, Children). tree: true prints an indented outline instead (depth default 2) with class counts for collapsed branches.",
         schema: z.object({
-          path: z.string().optional().describe("start path, e.g. game.Workspace"),
-          instance_type: z.string().optional().describe("ClassName filter"),
-          keywords: z.string().optional(),
-          max_depth: z.number().int().optional(),
-          head_limit: z.number().int().optional().describe("max results"),
+          path: z.string().optional().describe("dot path, e.g. Workspace.Map; game for everything"),
+          class: z.string().optional().describe("e.g. BasePart, Model, Script"),
+          name: z.string().optional(),
+          tag: z.string().optional(),
+          attr: z.string().optional().describe("has this attribute"),
+          depth: z.number().int().min(1).max(50).optional(),
+          props: z.array(z.string()).max(20).optional(),
+          limit: z.number().int().min(1).max(500).optional().describe("default 60 (tree 300)"),
+          tree: z.boolean().optional(),
         }),
-        run: async (args) => {
-          this.requireBuiltin("Tree search");
-          return this.studio("search_game_tree", { ...args, datamodel_type: "Edit" });
+        run: async (q, ctx) => this.job(queryLuau(q), ctx, q.tree ? "Reading the tree" : "Searching"),
+      },
+      {
+        name: "studio_edit",
+        description:
+          "Change Studio in one undoable step with a list of ops. set {path|query, props}: properties by name with JSON values converted to the property's type (Vector3 [x,y,z], Color3 \"#hex\", UDim2 [xs,xo,ys,yo], CFrame {pos,rot}, enums by name, \"@Path\" for instance refs, sequences like create_vfx; pseudo-props Pivot, Tags, Attributes, Parent). create {class, parent?, name?, props?, children?: [{class,name,props,children}]} (parts are anchored unless props say otherwise). delete {path|query}. clone {path, count?, offset? [x,y,z] per copy, parent?, name?}. move {path|query, by?, rotate? degrees, to? {pos,rot}, parent?}. select {paths}. query = studio_query filters.",
+        schema: z.object({
+          ops: z.array(z.object({ op: z.enum(["set", "create", "delete", "clone", "move", "select"]) }).catchall(z.any())).min(1).max(200),
+        }),
+        advertise: (s) => looseItems(s, { ops: "[{op: set|create|delete|clone|move|select, ...fields as described}]" }),
+        run: async ({ ops }, ctx) => this.job(editLuau(ops as EditOp[]), ctx, `Applying ${ops.length} change${ops.length > 1 ? "s" : ""}`),
+      },
+      {
+        name: "studio_scripts",
+        description: "Search the source of every script in the place (pattern: case-insensitive text, or a Lua pattern with regex: true), returning path:line matches with optional context lines. Without a pattern, lists scripts with line counts.",
+        schema: z.object({
+          pattern: z.string().optional(),
+          regex: z.boolean().optional(),
+          path: z.string().optional().describe("search under this path (default whole game)"),
+          context: z.number().int().min(0).max(3).optional(),
+          limit: z.number().int().min(1).max(300).optional(),
+        }),
+        run: async (q, ctx) => this.job(scriptSearchLuau(q), ctx, q.pattern ? "Searching scripts" : "Listing scripts"),
+      },
+      {
+        name: "studio_lighting",
+        description: `Set the mood in one call: a preset (${Object.keys(LIGHTING_PRESETS).join(", ")}) and/or Lighting properties (ClockTime, Brightness, Ambient, OutdoorAmbient, FogEnd…) plus Atmosphere, Bloom, ColorCorrection, SunRays and DepthOfField properties (false removes the effect).`,
+        schema: z.object({
+          preset: z.enum(Object.keys(LIGHTING_PRESETS) as [keyof typeof LIGHTING_PRESETS, ...(keyof typeof LIGHTING_PRESETS)[]]).optional(),
+          lighting: z.record(z.string(), z.any()).optional(),
+          atmosphere: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+          bloom: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+          colorCorrection: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+          sunRays: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+          depthOfField: z.union([z.record(z.string(), z.any()), z.literal(false)]).optional(),
+        }),
+        advertise: (s) => {
+          const props: Record<string, JsonSchema> = { preset: s.properties.preset, lighting: { type: "object", description: "Lighting properties" } };
+          for (const k of ["atmosphere", "bloom", "colorCorrection", "sunRays", "depthOfField"]) props[k] = { type: ["object", "boolean"] };
+          return { ...s, properties: props };
         },
+        run: async (input, ctx) => this.job(lightingLuau(input), ctx, "Setting the lighting"),
+      },
+      {
+        name: "studio_terrain",
+        description:
+          "Sculpt terrain with a list of ops: block|wedge {material, pos, size, rot?}, ball {material, pos, radius}, cylinder {material, pos, radius, height, rot?}, clear {min?, max?} (no region = everything), replace {from, to, min, max}, hills {center [x,y,z], size [x,z], height, material?, under?, seed?, scale?, water? (level)} generates rolling ground. Materials are Enum.Material names (Grass, Rock, Sand, Water, Snow, Mud, Ground, LeafyGrass, Basalt…).",
+        schema: z.object({
+          ops: z.array(z.object({ op: z.enum(["block", "wedge", "ball", "cylinder", "clear", "replace", "hills"]) }).catchall(z.any())).min(1).max(100),
+        }),
+        advertise: (s) => looseItems(s, { ops: "[{op, ...fields as described}]" }),
+        run: async ({ ops }, ctx) => this.job(terrainLuau(ops as TerrainOp[]), ctx, "Sculpting terrain"),
       },
       {
         name: "studio_inspect",
@@ -568,12 +679,30 @@ export class ForgeMcp {
         },
       },
       {
-        name: "studio_play",
-        description: "Start or stop a play-test in Studio.",
-        schema: z.object({ start: z.boolean() }),
-        run: async ({ start }) => {
-          if (this.deps.bridge.status.flavor === "legacy") return this.studio("start_stop_play", { mode: start ? "start_play" : "stop" });
-          return this.studio("start_stop_play", { is_start: start });
+        name: "studio_playtest",
+        description:
+          "Play-test in one call: start, let it run for seconds, collect the Output (errors and warnings first), then stop. keep: true leaves it running (inspect with studio_execute_luau datamodel Server/Client, stop with mode stop). mode start/stop only starts or stops.",
+        schema: z.object({
+          seconds: z.number().min(1).max(60).optional().describe("default 5"),
+          keep: z.boolean().optional(),
+          mode: z.enum(["test", "start", "stop"]).optional(),
+        }),
+        run: async ({ seconds, keep, mode }, ctx) => {
+          const legacy = this.deps.bridge.status.flavor === "legacy";
+          const play = (start: boolean) => this.deps.bridge.callTool("start_stop_play", legacy ? { mode: start ? "start_play" : "stop" } : { is_start: start });
+          if (mode === "start" || mode === "stop") return forward(await play(mode === "start"));
+          const consoleText = () => this.deps.bridge.callTool("get_console_output", {}).then(resultText, (e) => String(e));
+          const before = await consoleText();
+          const started = await play(true);
+          if (started.isError) return forward(started);
+          const wait = Math.round((seconds ?? 5) * 1000);
+          for (let t = 0; t < wait; t += 1000) {
+            ctx.progress(`Play-testing… ${Math.ceil((wait - t) / 1000)}s left`);
+            await new Promise((r) => setTimeout(r, Math.min(1000, wait - t)));
+          }
+          const output = await consoleText();
+          if (!keep) await play(false).catch(() => undefined);
+          return text(summarizeOutput(output, before) + (keep ? "\n(still running: stop with mode stop)" : "\n(stopped)"));
         },
       },
       {
@@ -623,4 +752,31 @@ function forward(res: ToolCallResult): ToolResult {
   }
   if (!content.length) content.push({ type: "text", text: resultText(res) || "(empty result)" });
   return { content, ...(res.isError ? { isError: true } : {}) };
+}
+
+/** execute_luau may hand back a returned string JSON-quoted; show it as plain text. */
+function unquote(out: string): string {
+  const t = out.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    try {
+      const v = JSON.parse(t);
+      if (typeof v === "string") return v;
+    } catch {
+      // Not JSON: keep as is.
+    }
+  }
+  return t;
+}
+
+/** The Output lines of this run (what was already there before is skipped), problems first, kept short. */
+export function summarizeOutput(output: string, before = ""): string {
+  // Studio may clear the Output when play starts; otherwise drop what was there before.
+  const fresh = before && output.startsWith(before) ? output.slice(before.length) : output;
+  const lines = fresh.split("\n").map((l) => l.trimEnd()).filter(Boolean);
+  const problems = lines.filter((l) => /error|exception|warn|stack|infinite yield|attempt to|nil value|failed/i.test(l));
+  const tail = lines.slice(-30);
+  const parts = [`Output: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${problems.length} problem${problems.length === 1 ? "" : "s"}.`];
+  if (problems.length) parts.push("Problems:", ...problems.slice(0, 30).map((l) => l.slice(0, 300)));
+  if (tail.length) parts.push("Last lines:", ...tail.filter((l) => !problems.slice(0, 30).includes(l)).map((l) => l.slice(0, 300)));
+  return parts.join("\n");
 }

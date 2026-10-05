@@ -5,7 +5,8 @@ import type {
   HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
-export type RightTab = "preview" | "assets" | "animate" | "place" | "studio";
+export type RightTab = "preview" | "assets" | "place" | "studio";
+export type LibraryTab = "models" | "animations" | "vfx";
 export type MobileView = "chats" | "chat" | "panel";
 
 export interface Toast {
@@ -36,8 +37,12 @@ interface State {
   currentGameId?: string;
   /** Library filter: "open" (the game open in Studio), "all", "none" (unfiled) or a game id. */
   libraryGame: string;
-  /** Animation shown in the Animate tab. */
+  /** Library sub tab. */
+  libraryTab: LibraryTab;
+  /** Animation shown in Library > Animations. */
   animationId: string | null;
+  /** Effect shown in Library > VFX. */
+  vfxId: string | null;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -76,7 +81,9 @@ export const useStore = create<State>(() => ({
   claudeUpdating: false,
   games: [],
   libraryGame: "open",
+  libraryTab: savedLibraryTab(),
   animationId: null,
+  vfxId: null,
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -201,10 +208,8 @@ function onEvent(e: ServerEvent) {
         // Specs only change with the version; import info lives on the summary.
         const assetCache = cached && cached.version !== e.asset.version ? omit(s.assetCache, e.asset.id) : s.assetCache;
         if (!e.focus) return { assets, assetCache };
-        // New or edited animations open in the Animate tab, everything else in the preview.
-        return e.asset.kind === "animation"
-          ? { assets, assetCache, activeAssetId: e.asset.id, animationId: e.asset.id, rightTab: "animate" as RightTab }
-          : { assets, assetCache, activeAssetId: e.asset.id, rightTab: "preview" as RightTab };
+        // New or edited animations and effects open in their library tab, everything else in the preview.
+        return { assets, assetCache, ...focusFor(e.asset.id, e.asset.kind) };
       });
       break;
     case "asset.deleted":
@@ -345,8 +350,37 @@ export async function loadAsset(id: string): Promise<Asset | null> {
   }
 }
 
+/** Where an asset opens: animations and effects in their library tab, the rest in the preview. */
+function focusFor(id: string, kind: AssetSummary["kind"] | undefined): Partial<State> {
+  if (kind === "animation") return { activeAssetId: id, animationId: id, rightTab: "assets", libraryTab: rememberLibraryTab("animations") };
+  if (kind === "vfx") return { activeAssetId: id, vfxId: id, rightTab: "assets", libraryTab: rememberLibraryTab("vfx") };
+  return { activeAssetId: id, rightTab: "preview" };
+}
+
 export function openAsset(id: string) {
-  set({ activeAssetId: id, rightTab: "preview", mobileView: "panel" });
+  set({ ...focusFor(id, get().assets.find((a) => a.id === id)?.kind), mobileView: "panel" });
+}
+
+function savedLibraryTab(): LibraryTab {
+  try {
+    const t = localStorage.getItem("forge.libraryTab");
+    return t === "animations" || t === "vfx" ? t : "models";
+  } catch {
+    return "models";
+  }
+}
+
+function rememberLibraryTab(tab: LibraryTab): LibraryTab {
+  try {
+    localStorage.setItem("forge.libraryTab", tab);
+  } catch {
+    // Not remembered in private mode.
+  }
+  return tab;
+}
+
+export function setLibraryTab(tab: LibraryTab) {
+  set({ libraryTab: rememberLibraryTab(tab), rightTab: "assets" });
 }
 
 export async function importAsset(id: string, overrides: Record<string, unknown> = {}): Promise<ImportResult> {

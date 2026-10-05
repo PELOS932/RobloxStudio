@@ -3,8 +3,8 @@
 
 import { assets, games, shortId } from "./store.ts";
 import { StudioError, type StudioBridge } from "./studio-bridge.ts";
-import { animationToLuau, modelToLuau, scriptToLuau, uiToLuau, type ImportOptions } from "../shared/to-luau.ts";
-import { animationToRbxmx, modelToRbxmx, scriptToRbxmx, uiToRbxmx } from "../shared/to-rbxmx.ts";
+import { animationToLuau, modelToLuau, scriptToLuau, uiToLuau, vfxToLuau, type ImportOptions } from "../shared/to-luau.ts";
+import { animationToRbxmx, modelToRbxmx, scriptToRbxmx, uiToRbxmx, vfxToRbxmx } from "../shared/to-rbxmx.ts";
 import { pullChunkLuau, pullSelectionLuau, PULL_CHUNK } from "../shared/studio-luau.ts";
 import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
@@ -16,6 +16,7 @@ export function buildLuau(asset: Asset, opts: ImportOptions) {
   if (asset.kind === "model") return modelToLuau(asset.spec, o);
   if (asset.kind === "ui") return uiToLuau(asset.spec, o);
   if (asset.kind === "animation") return animationToLuau(asset.spec, o);
+  if (asset.kind === "vfx") return vfxToLuau(asset.spec, o);
   return scriptToLuau(asset.spec, o);
 }
 
@@ -24,6 +25,7 @@ export function buildRbxmx(asset: Asset, opts: ImportOptions): string {
   if (asset.kind === "model") return modelToRbxmx(asset.spec, o);
   if (asset.kind === "ui") return uiToRbxmx(asset.spec, o);
   if (asset.kind === "animation") return animationToRbxmx(asset.spec, o);
+  if (asset.kind === "vfx") return vfxToRbxmx(asset.spec, o);
   return scriptToRbxmx(asset.spec, o);
 }
 

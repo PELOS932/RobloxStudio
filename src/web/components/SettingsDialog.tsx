@@ -100,7 +100,7 @@ function General({ s }: { s: Settings }) {
       </div>
       <AutoCompactField value={s.autoCompact} />
       <Toggle on={s.autoImport} onChange={(v) => void updateSettings({ autoImport: v })} title="Auto-import into Studio">
-        When Studio is connected, every model/UI/script Claude creates or edits is pushed into the place immediately.
+        When Studio is connected, every model, UI, animation and effect Claude creates or edits is pushed into the place immediately (scripts always go straight in).
       </Toggle>
       <Toggle on={s.autoApproveLuau} onChange={(v) => void updateSettings({ autoApproveLuau: v })} title="Let Claude run Luau in Studio without asking">
         Off: you approve each Luau snippet and script edit. Imports of assets never need approval.

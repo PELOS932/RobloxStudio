@@ -14,6 +14,8 @@ import {
 } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
 import { animationLength, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue, type Rig } from "./animation.ts";
+import { vfxSummary, vfxTree, type VfxSpec } from "./vfx.ts";
+import { treeToLuau } from "./instance-tree.ts";
 
 export interface ImportOptions {
   assetId?: string;
@@ -614,14 +616,39 @@ local function buildDummy(name)
 		part.Parent = model
 		parts[p[1]] = part
 	end
-	local mesh = Instance.new("SpecialMesh")
-	mesh.MeshType = Enum.MeshType.Head
-	mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
-	mesh.Parent = parts.Head
-	local face = Instance.new("Decal")
-	face.Name = "face"
-	face.Texture = "rbxasset://textures/face.png"
-	face.Parent = parts.Head
+	if RIG_TYPE == "R6" then
+		-- Classic head and smile.
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.Head
+		mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+		mesh.Parent = parts.Head
+		local face = Instance.new("Decal")
+		face.Name = "face"
+		face.Texture = "rbxasset://textures/face.png"
+		face.Parent = parts.Head
+	else
+		-- Block rig: cube head with a neutral face (two dot eyes and a flat mouth).
+		pcall(function()
+			local gui = Instance.new("SurfaceGui")
+			gui.Name = "face"
+			gui.Face = Enum.NormalId.Front
+			gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+			gui.PixelsPerStud = 100
+			gui.LightInfluence = 1
+			for _, f in { { 41, 44, 9, 16 }, { 70, 44, 9, 16 }, { 47, 80, 26, 4 } } do
+				local mark = Instance.new("Frame")
+				mark.Position = UDim2.fromOffset(f[1], f[2])
+				mark.Size = UDim2.fromOffset(f[3], f[4])
+				mark.BackgroundColor3 = Color3.fromRGB(26, 26, 26)
+				mark.BorderSizePixel = 0
+				local corner = Instance.new("UICorner")
+				corner.CornerRadius = UDim.new(1, 0)
+				corner.Parent = mark
+				mark.Parent = gui
+			end
+			gui.Parent = parts.Head
+		end)
+	end
 	for _, m in RIG_MOTORS do
 		local motor = Instance.new("Motor6D")
 		motor.Name = m[1]
@@ -727,6 +754,150 @@ local ok, result = pcall(function()
 		pcall(function() game:GetService("Selection"):Set({ dummy }) end)
 	end
 	return { ok = true, kind = "animation", path = seq:GetFullName(), rig = dummy:GetFullName(), keyframes = #KEYFRAMES, replaced = previous ~= nil }
+end)
+return forgeFinish(ok, result)
+`;
+  return { code };
+}
+
+// ---------------------------------------------------------------------------
+// Visual effects: a Model whose invisible Root part carries the emitters. Placed where the
+// camera looks; inside a BasePart (parent) it is welded on and follows the part.
+
+export function vfxToLuau(spec: VfxSpec, opts: ImportOptions = {}): LuauResult {
+  const { code: build, rootVars } = treeToLuau([vfxTree(spec)]);
+  const code = `${header("vfx", spec.name, ` · ${vfxSummary(spec)}`, opts, `Forge: import ${spec.name}`)}
+local PARENT_PATH = ${luaString(opts.parent ?? "Workspace")}
+local PLACEMENT = ${luaString(opts.placement ?? "camera")}
+local REPLACE = ${opts.replace ?? true}
+local SELECT = ${opts.select ?? true}
+${RUNTIME}
+local ok, result = pcall(function()
+	local parent
+	if PARENT_PATH == "@selection" then
+		parent = game:GetService("Selection"):Get()[1]
+		if not parent then error("Select a part in Studio to attach the effect to.", 0) end
+	else
+		parent = forgeResolve(PARENT_PATH)
+	end
+	-- (Not indented: the build code holds script sources in long strings.)
+${build}
+	local model = ${rootVars[0]}
+	local function pivotOf(m)
+		local okPivot, cf = pcall(function() return m:GetPivot() end)
+		if okPivot and cf then return cf end
+		local root = m:FindFirstChild("Root")
+		return if root and root:IsA("BasePart") then root.CFrame else CFrame.new()
+	end
+	local function pivotTo(cf)
+		if pcall(function() model:PivotTo(cf) end) then return end
+		-- Older APIs: move every part by the same transform.
+		local delta = cf * pivotOf(model):Inverse()
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") then d.CFrame = delta * d.CFrame end
+		end
+	end
+	local previous = nil
+	if REPLACE and FORGE_ASSET_ID then
+		-- The effect may have been moved anywhere (into a sword, a part…): keep it there.
+		for _, d in workspace:GetDescendants() do
+			if d:IsA("Model") and d:GetAttribute("ForgeAssetId") == FORGE_ASSET_ID then
+				previous = d
+				break
+			end
+		end
+	end
+	if previous then
+		parent = previous.Parent or parent
+		pivotTo(pivotOf(previous))
+		previous.Parent = nil
+	elseif parent:IsA("BasePart") then
+		pivotTo(parent.CFrame)
+	elseif PLACEMENT == "camera" then
+		pcall(function()
+			local cam = workspace.CurrentCamera.CFrame
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { model }
+			local look = workspace:Raycast(cam.Position, cam.LookVector * 200, params)
+			local target
+			if look and look.Normal.Y > 0.6 and look.Distance > 6 then
+				target = look.Position
+			else
+				local ahead = cam.Position + cam.LookVector * 14
+				local hit = workspace:Raycast(ahead + Vector3.new(0, 500, 0), Vector3.new(0, -2000, 0), params)
+				target = Vector3.new(ahead.X, if hit then hit.Position.Y else 0, ahead.Z)
+			end
+			pivotTo(CFrame.new(math.round(target.X), target.Y, math.round(target.Z)))
+		end)
+	end
+	if parent:IsA("BasePart") then
+		-- Ride along with the part instead of staying anchored in place.
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.Anchored = false
+				d.Massless = true
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = d
+				weld.Part1 = parent
+				weld.Parent = d
+			end
+		end
+	end
+	if FORGE_ASSET_ID then
+		model:SetAttribute("ForgeAssetId", FORGE_ASSET_ID)
+		model:SetAttribute("ForgeVersion", FORGE_VERSION)
+	end
+	model.Parent = parent
+	if SELECT then
+		pcall(function() game:GetService("Selection"):Set({ model }) end)
+	end
+	return { ok = true, kind = "vfx", path = model:GetFullName(), emitters = ${spec.emitters.length}, replaced = previous ~= nil }
+end)
+return forgeFinish(ok, result)
+`;
+  return { code };
+}
+
+/**
+ * Insert or update several scripts in one round trip. A script with the same name under the
+ * same parent is updated in place (its Source; the class changes only if it has to).
+ */
+export function scriptsToLuau(specs: ScriptSpec[]): LuauResult {
+  const items = specs.map((s) => `{ ${luaString(s.name)}, ${luaString(s.kind)}, ${luaString(s.parent ?? "ServerScriptService")}, ${luaLongString(s.source)} }`);
+  const code = `-- Studio Forge · ${specs.length} script${specs.length === 1 ? "" : "s"}
+local FORGE_LABEL = ${luaString(`Forge: ${specs.map((s) => s.name).join(", ").slice(0, 80)}`)}
+local SCRIPTS = {
+	${items.join(",\n\t")},
+}
+${RUNTIME}
+local ok, result = pcall(function()
+	local out = {}
+	local made = {}
+	for _, s in SCRIPTS do
+		local parent = forgeResolve(s[3])
+		local existing = parent:FindFirstChild(s[1])
+		local script
+		local updated = false
+		if existing and existing:IsA("LuaSourceContainer") and existing.ClassName == s[2] then
+			script = existing
+			updated = true
+		else
+			script = Instance.new(s[2])
+			script.Name = s[1]
+			if existing and existing:IsA("LuaSourceContainer") then
+				-- Same name, different class: replace it.
+				existing.Parent = nil
+				updated = true
+			end
+		end
+		script.Source = s[4]
+		script.Parent = parent
+		table.insert(made, script)
+		table.insert(out, { path = script:GetFullName(), class = s[2], lines = #string.split(s[4], "\\n"), updated = updated })
+	end
+	pcall(function() game:GetService("Selection"):Set(made) end)
+	return { ok = true, scripts = out }
 end)
 return forgeFinish(ok, result)
 `;

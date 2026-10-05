@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api.ts";
 import { Icon } from "../lib/icons.tsx";
 import { importAsset, insertIntoComposer, loadAsset, setRightTab, toast, useStore } from "../store.ts";
-import type { Asset } from "../../shared/assets.ts";
+import type { Asset, AssetSummary } from "../../shared/assets.ts";
 import type { RigType } from "../../shared/animation.ts";
 import { AnimationViewer } from "./AnimationViewer.tsx";
 import { AssetThumb } from "./AssetThumb.tsx";
 import { timeAgo } from "./Library.tsx";
 
-// The Animate tab: pick a rig (R15 or R6), browse animations and play them live.
+// Library > Animations: pick a rig (R15 or R6), browse the game's animations and play them live.
 
 function savedRig(): RigType {
   try {
@@ -18,15 +18,14 @@ function savedRig(): RigType {
   }
 }
 
-export function AnimatePanel() {
-  const all = useStore((s) => s.assets);
+export function AnimatePanel({ items }: { items: AssetSummary[] }) {
   const studio = useStore((s) => s.studio);
   const selected = useStore((s) => s.animationId);
   const cache = useStore((s) => s.assetCache);
   const [rig, setRig] = useState<RigType>(savedRig);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
-  const animations = useMemo(() => all.filter((a) => a.kind === "animation" && a.name.toLowerCase().includes(q.toLowerCase())), [all, q]);
+  const animations = useMemo(() => items.filter((a) => a.name.toLowerCase().includes(q.toLowerCase())), [items, q]);
   const current = animations.find((a) => a.id === selected) ?? animations[0];
   const full = current ? cache[current.id] : undefined;
   const asset = full && full.kind === "animation" && full.version === current?.version ? full : undefined;

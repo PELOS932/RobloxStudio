@@ -29,7 +29,7 @@ export function conversationMarkdown(conv: Conversation, assets: AssetSummary[])
     for (const b of m.blocks) {
       if (b.type === "tool") {
         tools.push(toolLine(b));
-        for (const id of b.result?.text.match(/\b[mus]_[a-z0-9]{6}\b/g) ?? []) mentioned.add(id);
+        for (const id of b.result?.text.match(/\b[musav]_[a-z0-9]{6}\b/g) ?? []) mentioned.add(id);
       } else if (b.type === "text" && b.text.trim()) {
         flush();
         out.push(b.text.trim(), "");

@@ -7,6 +7,8 @@ import { materialFor, tileOf } from "./materials.ts";
 import { partGeometry, partMatrix } from "./geometry.ts";
 import { animationLength, buildTracks, poseRig, RIGS, sampleTracks, type AnimationSpec } from "../../shared/animation.ts";
 import { applyPose, buildRig } from "./rig3d.ts";
+import { isOneShot, oneShotLength, type VfxSpec } from "../../shared/vfx.ts";
+import { createVfx, mulberry, vfxExtent } from "./vfx3d.ts";
 
 const W = 288;
 const H = 180;
@@ -243,6 +245,71 @@ export function animationPreview(key: string, spec: AnimationSpec, frames: numbe
     queue = p;
     animFrames.set(k, p);
     if (animFrames.size > 40) animFrames.delete(animFrames.keys().next().value!);
+  }
+  return p;
+}
+
+// ------------------------------------------------------------------ effects
+
+/** Frames of an effect simulating (deterministic), on a dark backdrop. */
+function renderVfx(spec: VfxSpec, frames: number): string[] {
+  const e = getEngine();
+  const rt = createVfx(spec, mulberry(7));
+  e.root.add(rt.object);
+  const bg = e.scene.background;
+  e.scene.background = new THREE.Color(0x15161b);
+  const { center, radius } = vfxExtent(spec);
+  const dir = new THREE.Vector3(0.55, 0.32, -1).normalize();
+  const dist = (radius / Math.sin(THREE.MathUtils.degToRad(e.camera.fov) / 2)) * 0.95;
+  e.camera.position.copy(center).addScaledVector(dir, Math.max(6, dist));
+  e.camera.near = 0.05;
+  e.camera.far = dist * 20;
+  e.camera.updateProjectionMatrix();
+  e.camera.lookAt(center);
+  e.camera.updateMatrixWorld();
+  const out: string[] = [];
+  try {
+    // One-shots are photographed mid-blast; looping effects once they've filled in.
+    const oneShot = isOneShot(spec);
+    rt.warm(oneShot ? Math.min(0.35, oneShotLength(spec) * 0.25) : 1.6, e.camera);
+    const step = frames > 1 ? (oneShot ? oneShotLength(spec) : 2) / frames : 0;
+    for (let i = 0; i < frames; i++) {
+      if (i > 0) rt.warm(step, e.camera);
+      e.renderer.render(e.scene, e.camera);
+      out.push(e.renderer.domElement.toDataURL("image/png"));
+    }
+  } finally {
+    e.scene.background = bg;
+    e.root.remove(rt.object);
+    rt.dispose();
+  }
+  return out;
+}
+
+const vfxFrames = new Map<string, Promise<string[]>>();
+
+/** A still (frames = 1) or frames of the effect playing, rendered once per key. */
+export function vfxPreview(key: string, spec: VfxSpec, frames: number): Promise<string[]> {
+  const k = `${key}:${frames}`;
+  let p = vfxFrames.get(k);
+  if (!p) {
+    p = queue.then(
+      () =>
+        new Promise<string[]>((resolve) =>
+          setTimeout(() => {
+            let out: string[] = [];
+            try {
+              out = renderVfx(spec, frames);
+            } catch {
+              // No WebGL.
+            }
+            resolve(out);
+          }, 0),
+        ),
+    );
+    queue = p;
+    vfxFrames.set(k, p);
+    if (vfxFrames.size > 40) vfxFrames.delete(vfxFrames.keys().next().value!);
   }
   return p;
 }

@@ -19,6 +19,8 @@ import type { ScriptSpec } from "./script.ts";
 import { jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue } from "./animation.ts";
 import { eulerXYZDeg } from "./math.ts";
 import type { ImportOptions } from "./to-luau.ts";
+import { vfxTree, type VfxSpec } from "./vfx.ts";
+import type { InstNode, PropValue } from "./instance-tree.ts";
 
 type Prop = string;
 
@@ -396,4 +398,66 @@ export function animationToRbxmx(spec: AnimationSpec, opts: ImportOptions = {}):
   }
   w.close();
   return w.toString();
+}
+
+// ---------------------------------------------------------------------------
+// Generic instance trees (visual effects)
+
+/** Serialized names that differ from the Luau property names. */
+const XML_NAMES: Record<string, Record<string, string>> = {
+  Fire: { Heat: "heat_xml", Size: "size_xml" },
+  Smoke: { Opacity: "opacity_xml", RiseVelocity: "riseVelocity_xml", Size: "size_xml" },
+  Part: { Size: "size" },
+  Model: { WorldPivot: "WorldPivotData" },
+};
+
+function xmlProp(className: string, key: string, v: PropValue, refs: Map<string, string>): Prop {
+  const name = XML_NAMES[className]?.[key] ?? key;
+  if (typeof v === "number") return float(name, v);
+  if (typeof v === "boolean") return bool(name, v);
+  if (typeof v === "string") return str(name, v);
+  if ("int" in v) return int(name, v.int);
+  if ("enum" in v) return token(name, v.token);
+  if ("v3" in v) return vec3(name, v.v3);
+  if ("v2" in v) return vec2(name, v.v2);
+  if ("rgb" in v) return color3rgb(name, v.rgb);
+  if ("range" in v) return `<NumberRange name="${name}">${num(v.range[0])} ${num(v.range[1])} </NumberRange>`;
+  // The legacy name for older Studio builds, plus the newer Content property (TextureContent…).
+  if ("content" in v) return `<Content name="${name}"><url>${esc(v.content)}</url></Content><Content name="${name}Content"><uri>${esc(v.content)}</uri></Content>`;
+  if ("ref" in v) return `<Ref name="${name}">${refs.get(v.ref) ?? "null"}</Ref>`;
+  if ("nseq" in v) return `<NumberSequence name="${name}">${v.nseq.map((k) => `${num(k.t)} ${num(k.v)} ${num(k.e)} `).join("")}</NumberSequence>`;
+  if ("cseq" in v) return `<ColorSequence name="${name}">${v.cseq.map((k) => `${num(k.t)} ${k.c.map((c) => c / 255).join(" ")} 0 `).join("")}</ColorSequence>`;
+  const body = `${cframeBody(v.cf.pos, v.cf.rot ?? [1, 0, 0, 0, 1, 0, 0, 0, 1])}`;
+  return name === "WorldPivotData" ? `<OptionalCoordinateFrame name="${name}"><CFrame>${body}</CFrame></OptionalCoordinateFrame>` : `<CoordinateFrame name="${name}">${body}</CoordinateFrame>`;
+}
+
+function writeTree(roots: InstNode[], extraRootProps: Prop[] = []): string {
+  // Referents in document order, so refs can point forward.
+  const refs = new Map<string, string>();
+  let n = 0;
+  const number = (node: InstNode) => {
+    if (node.id) refs.set(node.id, `RBX${n}`);
+    n++;
+    for (const c of node.children ?? []) number(c);
+  };
+  for (const r of roots) number(r);
+  const w = new Writer();
+  const visit = (node: InstNode, isRoot: boolean) => {
+    const props: Prop[] = [str("Name", node.name)];
+    for (const [k, v] of Object.entries(node.props ?? {})) props.push(xmlProp(node.className, k, v, refs));
+    if (node.source !== undefined) props.push(protectedString("Source", node.source));
+    if (node.attrs && Object.keys(node.attrs).length) props.push(attributes(node.attrs));
+    if (isRoot) props.push(...extraRootProps);
+    w.open(node.className, props);
+    for (const c of node.children ?? []) visit(c, false);
+    w.close();
+  };
+  for (const r of roots) visit(r, true);
+  return w.toString();
+}
+
+export function vfxToRbxmx(spec: VfxSpec, opts: ImportOptions = {}): string {
+  const tree = vfxTree(spec);
+  tree.props = { ...tree.props, WorldPivot: { cf: { pos: [0, 0, 0] } } };
+  return writeTree([tree], forgeAttrs(opts));
 }

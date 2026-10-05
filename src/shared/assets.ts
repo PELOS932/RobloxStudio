@@ -2,8 +2,14 @@ import type { ModelSpec } from "./model.ts";
 import type { UiSpec } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
 import { animationLength, type AnimationSpec } from "./animation.ts";
+import { vfxSummary, type VfxSpec } from "./vfx.ts";
 
-export type AssetKind = "model" | "ui" | "script" | "animation";
+export type AssetKind = "model" | "ui" | "script" | "animation" | "vfx";
+/** Kinds the library shows (scripts go straight into Studio; UIs live in the preview). */
+export const LIBRARY_KINDS = ["model", "animation", "vfx"] as const;
+export const ID_PREFIX: Record<AssetKind, string> = { model: "m_", ui: "u_", script: "s_", animation: "a_", vfx: "v_" };
+/** Matches asset ids in tool results and messages. */
+export const ASSET_ID_RE = /\b([musav]_[a-z0-9]{6})\b/;
 
 interface AssetBase {
   id: string;
@@ -31,7 +37,8 @@ export type Asset =
   | (AssetBase & { kind: "model"; spec: ModelSpec })
   | (AssetBase & { kind: "ui"; spec: UiSpec; html?: HtmlSource })
   | (AssetBase & { kind: "script"; spec: ScriptSpec })
-  | (AssetBase & { kind: "animation"; spec: AnimationSpec });
+  | (AssetBase & { kind: "animation"; spec: AnimationSpec })
+  | (AssetBase & { kind: "vfx"; spec: VfxSpec });
 
 export interface AssetSummary {
   id: string;
@@ -55,11 +62,13 @@ export function summarize(a: Asset): AssetSummary {
     a.kind === "model" ? a.spec.parts.length
     : a.kind === "ui" ? a.spec.nodes.length
     : a.kind === "animation" ? a.spec.keyframes.length
+    : a.kind === "vfx" ? a.spec.emitters.length
     : a.spec.source.split("\n").length;
   return {
     id: a.id, kind: a.kind, name: a.name, version: a.version, updatedAt: a.updatedAt, size, lastImport: a.lastImport,
     fromHtml: a.kind === "ui" && !!a.html, gameId: a.gameId, description: a.description,
     ...(a.kind === "animation" ? { detail: `${a.spec.rig} · ${Math.round(animationLength(a.spec) * 100) / 100}s${a.spec.loop === false ? "" : " · loop"}` } : {}),
+    ...(a.kind === "vfx" ? { detail: vfxSummary(a.spec) } : {}),
   };
 }
 
@@ -67,5 +76,6 @@ export function sizeLabel(kind: AssetKind, size: number): string {
   if (kind === "model") return `${size} part${size === 1 ? "" : "s"}`;
   if (kind === "ui") return `${size} element${size === 1 ? "" : "s"}`;
   if (kind === "animation") return `${size} keyframe${size === 1 ? "" : "s"}`;
+  if (kind === "vfx") return `${size} emitter${size === 1 ? "" : "s"}`;
   return `${size} line${size === 1 ? "" : "s"}`;
 }

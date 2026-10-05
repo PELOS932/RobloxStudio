@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadAsset, useStore } from "../store.ts";
 import { KindIcon } from "../lib/icons.tsx";
-import { animationPreview, modelThumbnail, modelTurntable, uploadThumbnail } from "../lib/thumbnails.ts";
+import { animationPreview, modelThumbnail, modelTurntable, uploadThumbnail, vfxPreview } from "../lib/thumbnails.ts";
 import type { AnimationSpec } from "../../shared/animation.ts";
+import type { VfxSpec } from "../../shared/vfx.ts";
 import { UiScreen } from "./UiPreview.tsx";
 import { highlightLuau } from "./ScriptView.tsx";
 import type { AssetKind } from "../../shared/assets.ts";
@@ -17,7 +18,7 @@ import type { UiSpec } from "../../shared/ui.ts";
 export function AssetThumb({ id, kind, version, width, height, thumb, spin = false }: {
   id: string; kind: AssetKind; version: number; width: number | string; height: number | string; thumb?: number; spin?: boolean;
 }) {
-  const cached = (kind === "model" || kind === "animation") && thumb === version;
+  const cached = (kind === "model" || kind === "animation" || kind === "vfx") && thumb === version;
   const needSpec = !cached || spin;
   const asset = useStore((s) => s.assetCache[id]);
   const current = asset && asset.version === version ? asset : undefined;
@@ -47,6 +48,10 @@ export function AssetThumb({ id, kind, version, width, height, thumb, spin = fal
     if (spin && current?.kind === "animation") body = <AnimationPlay key={`${id}:${version}`} cacheKey={`${id}:${version}`} spec={current.spec} still={still} />;
     else if (still) body = still;
     else if (current?.kind === "animation") body = <AnimationStill key={`${id}:${version}`} id={id} version={version} spec={current.spec} />;
+  } else if (kind === "vfx") {
+    if (spin && current?.kind === "vfx") body = <FramesPlay key={`${id}:${version}`} load={() => vfxPreview(`${id}:${version}`, current.spec, 24)} fps={12} still={still} />;
+    else if (still) body = still;
+    else if (current?.kind === "vfx") body = <VfxStill key={`${id}:${version}`} id={id} version={version} spec={current.spec} />;
   } else if (current?.kind === "ui") {
     body = <UiMini spec={current.spec} w={current.html?.width ?? 1280} h={current.html?.height ?? 720} box={box} />;
   } else if (current?.kind === "script") body = <CodeMini source={current.spec.source} />;
@@ -131,6 +136,44 @@ function AnimationPlay({ cacheKey, spec, still }: { cacheKey: string; spec: Anim
     const t = setInterval(() => setI((n) => (n + 1) % frames.length), (length * 1000) / frames.length);
     return () => clearInterval(t);
   }, [frames, length]);
+  if (!frames?.length) return <>{still ?? <span className="thumb-loading" />}</>;
+  return <img src={frames[i % frames.length]} alt="" draggable={false} />;
+}
+
+function VfxStill({ id, version, spec }: { id: string; version: number; spec: VfxSpec }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void vfxPreview(`${id}:${version}`, spec, 1).then(([u = ""]) => {
+      if (!alive) return;
+      setUrl(u);
+      uploadThumbnail(id, version, u);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [id, version, spec]);
+  if (url === null) return <span className="thumb-loading" />;
+  if (!url) return <KindIcon kind="vfx" size={18} />;
+  return <img src={url} alt="" draggable={false} />;
+}
+
+/** Pre-rendered frames played in a loop (hover previews). */
+function FramesPlay({ load, fps, still }: { load: () => Promise<string[]>; fps: number; still: React.ReactNode }) {
+  const [frames, setFrames] = useState<string[] | null>(null);
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void load().then((f) => alive && setFrames(f));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!frames?.length) return;
+    const t = setInterval(() => setI((n) => (n + 1) % frames.length), 1000 / fps);
+    return () => clearInterval(t);
+  }, [frames, fps]);
   if (!frames?.length) return <>{still ?? <span className="thumb-loading" />}</>;
   return <img src={frames[i % frames.length]} alt="" draggable={false} />;
 }

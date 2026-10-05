@@ -1,0 +1,78 @@
+[
+  {
+    "name": "Campfire",
+    "description": "Flames, rising embers, a little smoke and a warm light.",
+    "emitters": [
+      {"name": "Flames", "type": "particles", "pos": [0, 0.4, 0], "shape": "disc", "shapeSize": [1.6, 0.2, 1.6], "texture": "fire", "color": [[0, "#ffd36b"], [0.45, "#ff7a1a"], [1, "#a8200a"]], "size": [[0, 1.4], [0.5, 1.8], [1, 0.4]], "transparency": [[0, 0.3], [0.6, 0.45], [1, 1]], "lifetime": [0.6, 1.1], "rate": 45, "speed": [2, 4], "spread": 12, "rotation": [-30, 30], "spin": [-60, 60], "lightEmission": 1},
+      {"name": "Embers", "type": "particles", "pos": [0, 0.6, 0], "texture": "spark", "color": ["#ffc04d", "#ff5a1f"], "size": [0.18, 0.05], "transparency": [0, 1], "lifetime": [1.2, 2.2], "rate": 14, "speed": [4, 7], "spread": 25, "accel": [0, 1.5, 0], "drag": 1, "lightEmission": 1},
+      {"name": "Smoke", "type": "particles", "pos": [0, 2.2, 0], "texture": "smoke", "color": "#3d3936", "size": [[0, 1], [1, 3.5]], "transparency": [[0, 0.75], [0.3, 0.6], [1, 1]], "lifetime": [2.5, 3.5], "rate": 4, "speed": [1.5, 2.5], "spread": 15, "rotation": [0, 360], "spin": [-20, 20], "accel": [0.4, 0.2, 0]},
+      {"name": "Glow", "type": "light", "pos": [0, 1.5, 0], "color": "#ff9a4a", "brightness": 2.5, "range": 16}
+    ]
+  },
+  {
+    "name": "Magic Aura",
+    "description": "A ring of violet energy rising around whoever stands in it.",
+    "emitters": [
+      {"name": "Ring", "type": "particles", "pos": [0, 0.2, 0], "shape": "cylinder", "shapeSize": [5, 0.2, 5], "surface": true, "texture": "glow", "color": ["#c69bff", "#6a2cff"], "size": [[0, 0.9], [1, 0]], "transparency": [[0, 0.2], [1, 1]], "lifetime": [1.2, 2], "rate": 80, "speed": [2.5, 4], "lightEmission": 1},
+      {"name": "Motes", "type": "particles", "pos": [0, 2, 0], "shape": "sphere", "shapeSize": [4, 4, 4], "texture": "sparkle", "color": "#e3d1ff", "size": [0.35, 0], "transparency": [0, 1], "lifetime": [1.5, 2.5], "rate": 12, "speed": [0.5, 1], "spread": 180, "spin": [-90, 90], "lightEmission": 1},
+      {"name": "Light", "type": "light", "pos": [0, 1, 0], "color": "#9b6bff", "brightness": 2, "range": 12}
+    ]
+  },
+  {
+    "name": "Explosion",
+    "description": "A one-shot blast: flash, shockwave, fireball, smoke and sparks. Play it with require(effect.Play)().",
+    "emitters": [
+      {"name": "Flash", "type": "particles", "pos": [0, 2, 0], "texture": "glow", "color": "#fff1c1", "size": [[0, 4], [1, 12]], "transparency": [[0, 0], [1, 1]], "lifetime": 0.25, "burst": 1, "speed": 0, "lightEmission": 1, "zOffset": 1},
+      {"name": "Shockwave", "type": "particles", "pos": [0, 0.5, 0], "texture": "ring", "color": "#ffd9a0", "size": [[0, 2], [1, 22]], "transparency": [[0, 0.2], [1, 1]], "lifetime": 0.6, "burst": 1, "speed": 0, "orientation": "velocityPerp", "lightEmission": 0.6},
+      {"name": "Fireball", "type": "particles", "pos": [0, 2, 0], "texture": "core", "color": [[0, "#ffe08a"], [0.4, "#ff7b22"], [1, "#5a1d0a"]], "size": [[0, 3], [1, 7]], "transparency": [[0, 0], [0.7, 0.4], [1, 1]], "lifetime": [0.6, 0.9], "burst": 18, "speed": [6, 14], "spread": 180, "drag": 4, "rotation": [0, 360], "spin": [-90, 90], "lightEmission": 0.8},
+      {"name": "Smoke", "type": "particles", "pos": [0, 2.5, 0], "texture": "puff", "color": "#3b3632", "size": [[0, 3], [1, 8]], "transparency": [[0, 0.4], [1, 1]], "lifetime": [2, 3], "burst": 14, "delay": 0.15, "speed": [3, 7], "spread": 180, "drag": 2, "accel": [0, 2, 0], "rotation": [0, 360], "spin": [-30, 30]},
+      {"name": "Sparks", "type": "particles", "pos": [0, 2, 0], "texture": "spark", "color": ["#fff2b0", "#ff8a1f"], "size": [0.35, 0.05], "transparency": [0, 1], "lifetime": [0.8, 1.4], "burst": 40, "speed": [18, 34], "spread": 180, "accel": [0, -40, 0], "drag": 1.5, "orientation": "velocity", "squash": 1.5, "lightEmission": 1}
+    ]
+  },
+  {
+    "name": "Portal",
+    "description": "A swirling teal gateway with drifting sparkles.",
+    "emitters": [
+      {"name": "Vortex", "type": "particles", "pos": [0, 4, 0], "texture": "vortex", "color": ["#7ffff0", "#1a8cff"], "size": [[0, 6], [1, 3]], "transparency": [[0, 1], [0.3, 0.2], [1, 1]], "lifetime": 1.5, "rate": 6, "speed": 0, "rotation": [0, 360], "spin": [160, 220], "orientation": "velocityPerp", "direction": "front", "lightEmission": 1},
+      {"name": "Rim", "type": "particles", "pos": [0, 4, 0], "shape": "disc", "shapeSize": [6, 6, 0.2], "surface": true, "direction": "front", "texture": "glow", "color": "#5ff7ff", "size": [[0, 0.5], [1, 0]], "transparency": [0.1, 1], "lifetime": [0.4, 0.8], "rate": 90, "speed": [0.2, 0.6], "lightEmission": 1},
+      {"name": "Sparkles", "type": "particles", "pos": [0, 4, 0], "shape": "sphere", "shapeSize": [7, 7, 2], "texture": "sparkle", "color": "#c8fffb", "size": [0.3, 0], "transparency": [0, 1], "lifetime": [1, 2], "rate": 18, "speed": [0.5, 1.5], "spread": 180, "lightEmission": 1},
+      {"name": "Light", "type": "light", "pos": [0, 4, -1], "color": "#4fe8ff", "brightness": 3, "range": 14}
+    ]
+  },
+  {
+    "name": "Sword Slash Trail",
+    "description": "A bright blade trail. Import it into the blade part (parent) so it follows the swing.",
+    "motion": "swing",
+    "emitters": [
+      {"name": "Slash", "type": "trail", "from": [0, 0.5, 0], "to": [0, 4.5, 0], "color": ["#ffffff", "#5ab0ff"], "transparency": [[0, 0.1], [1, 1]], "lifetime": 0.25, "lightEmission": 1, "faceCamera": false},
+      {"name": "Glint", "type": "particles", "pos": [0, 4.5, 0], "texture": "sparkle", "color": "#d6ecff", "size": [0.5, 0], "transparency": [0, 1], "lifetime": 0.3, "rate": 30, "speed": 0, "spin": [-180, 180], "lightEmission": 1}
+    ]
+  },
+  {
+    "name": "Lightning Arc",
+    "description": "A crackling beam between two points with sparks at both ends.",
+    "emitters": [
+      {"name": "Bolt", "type": "beam", "from": [-6, 3, 0], "to": [6, 3, 0], "curve": [3, -3], "width": [0.3, 0.3], "color": ["#d6f1ff", "#8fa4ff"], "transparency": [[0, 0.35], [0.5, 0.05], [1, 0.35]], "lightEmission": 1, "segments": 30},
+      {"name": "Halo", "type": "beam", "from": [-6, 3, 0], "to": [6, 3, 0], "curve": [3, -3], "width": [1.6, 1.6], "color": "#7a8cff", "transparency": [[0, 0.75], [0.5, 0.55], [1, 0.75]], "texture": "glow", "textureLength": 2, "textureSpeed": 3, "textureMode": "wrap", "lightEmission": 1, "segments": 30},
+      {"name": "SparksA", "type": "particles", "pos": [-6, 3, 0], "texture": "spark", "color": "#d8f4ff", "size": [0.3, 0], "transparency": [0, 1], "lifetime": 0.4, "rate": 40, "speed": [4, 9], "spread": 180, "lightEmission": 1},
+      {"name": "SparksB", "type": "particles", "pos": [6, 3, 0], "texture": "spark", "color": "#d8f4ff", "size": [0.3, 0], "transparency": [0, 1], "lifetime": 0.4, "rate": 40, "speed": [4, 9], "spread": 180, "lightEmission": 1},
+      {"name": "Light", "type": "light", "pos": [0, 3, 0], "color": "#9fb4ff", "brightness": 2, "range": 14}
+    ]
+  },
+  {
+    "name": "Snowfall",
+    "description": "Gentle snow over a 40-stud area.",
+    "emitters": [
+      {"name": "Snow", "type": "particles", "pos": [0, 18, 0], "shape": "box", "shapeSize": [40, 1, 40], "direction": "down", "texture": "glow", "color": "#ffffff", "size": [[0, 0.4], [1, 0.3]], "transparency": [[0, 1], [0.1, 0.1], [0.9, 0.2], [1, 1]], "lifetime": [5, 7], "rate": 120, "speed": [2.5, 4], "spread": 15, "accel": [0.6, 0, 0.2]}
+    ]
+  },
+  {
+    "name": "Healing Pickup",
+    "description": "Green plus-sparkles rising from a glowing pad.",
+    "emitters": [
+      {"name": "Pad", "type": "particles", "pos": [0, 0.15, 0], "shape": "disc", "shapeSize": [4, 0.2, 4], "texture": "glow", "color": "#62ff9b", "size": [[0, 0.8], [1, 0]], "transparency": [[0, 0.4], [1, 1]], "lifetime": [0.6, 1], "rate": 40, "speed": [0.5, 1.5], "lightEmission": 1},
+      {"name": "Rise", "type": "particles", "pos": [0, 0.5, 0], "shape": "disc", "shapeSize": [3, 0.2, 3], "texture": "sparkle", "color": ["#b6ffcf", "#29e06f"], "size": [0.45, 0], "transparency": [0, 1], "lifetime": [1.2, 2], "rate": 16, "speed": [2, 4], "spin": [-90, 90], "lightEmission": 1},
+      {"name": "Light", "type": "light", "pos": [0, 1.5, 0], "color": "#5dff96", "brightness": 1.5, "range": 10}
+    ]
+  }
+]

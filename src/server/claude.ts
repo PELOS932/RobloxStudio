@@ -221,7 +221,7 @@ class ClaudeSession {
       blocks: [{ type: "text", text: p.text }],
       createdAt: Date.now(),
     };
-    if (conv.messages.length === 0 && conv.title === "New chat") conv.title = p.text.replace(/^(?:@[mus]_[a-z0-9]{6}\s+)+/, "").replace(/\s+/g, " ").trim().slice(0, 60) || "New chat";
+    if (conv.messages.length === 0 && conv.title === "New chat") conv.title = p.text.replace(/^(?:@[musav]_[a-z0-9]{6}\s+)+/, "").replace(/\s+/g, " ").trim().slice(0, 60) || "New chat";
     conv.messages.push(user);
     bus.emitEvent({ type: "message", convId: this.convId, message: user });
     const assistant: ChatMessage = { id: shortId("msg_"), role: "assistant", blocks: [], createdAt: Date.now(), model: this.deps.getSettings().model };

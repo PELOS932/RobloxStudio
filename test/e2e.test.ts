@@ -190,6 +190,35 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(rbxmx).toContain('<Item class="KeyframeSequence"');
   });
 
+  it("makes an effect, writes scripts straight into Studio and edits the place in single calls", async () => {
+    await waitFor("studio", (e) => e.status.state === "connected" && !!e.status.studioId);
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "Make a portal effect" }));
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && events.some((x) => x.type === "message" && x.convId === conv.id && x.message.blocks.some((b) => b.type === "text" && b.text === "Done.")), 60_000);
+    const last = (await api(`/api/conversations/${conv.id}`)).body.messages.at(-1);
+    const results = last.blocks.filter((b: { type: string }) => b.type === "tool").map((b: { result?: { text: string } }) => b.result?.text ?? "");
+    expect(results[0]).toMatch(/Created vfx "Mini Portal" \(id v_\w{6}, v1, 2 emitters: 1 emitter · 1 light\)/);
+    expect(results[0]).toMatch(/Imported in Studio at Workspace\.Mini Portal/);
+    expect(results[1]).toMatch(/Edited vfx "Mini Portal".*v2, 3 emitters/);
+    expect(results[2]).toBe("Created Script ServerScriptService.PortalTouch (1 lines)\nCreated ModuleScript ReplicatedStorage.PortalConfig (1 lines)");
+    expect(results[3]).toMatch(/^ok · 1 instances changed \(one undo step\)\n1 created Workspace\.PortalPad$/);
+    expect(results[4]).toBe("in Workspace: 1 match\nPortalPad [Part] Size=8,1,8 Material=Neon");
+    expect(results[5]).toMatch(/^Lighting preset night/);
+    expect(results[6]).toMatch(/^Output: .*\n[\s\S]*\(stopped\)$/);
+    // Scripts are not library assets; the effect is, with its emitters really in the place.
+    const assets = (await api("/api/state")).body.assets as { kind: string; name: string; detail?: string }[];
+    expect(assets.some((a) => a.kind === "script")).toBe(false);
+    expect(assets.find((a) => a.kind === "vfx")).toMatchObject({ name: "Mini Portal", detail: "1 emitter · 1 light · 1 sparkles" });
+    const check = (await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: 'local m = workspace["Mini Portal"] return m.Root.Swirl.Swirl.Rate .. " " .. tostring(m.Root.Glints:FindFirstChildOfClass("Sparkles") ~= nil) .. " " .. #m:GetChildren()' }) })).body;
+    expect(check).toMatchObject({ ok: true, output: "12 true 1" });
+
+    const starters = (await api("/api/vfx/starters", { method: "POST" })).body;
+    expect(starters.ids).toHaveLength(8);
+    const rbxmx = await (await fetch(`${BASE}/api/assets/${starters.ids[2]}/export?format=rbxmx`)).text();
+    expect(rbxmx).toContain('<Item class="ParticleEmitter"');
+    expect(rbxmx).toContain('<Item class="ModuleScript"');
+  });
+
   it("browses the open place: Explorer, map, scripts and selection", async () => {
     const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
     const top = (await post("/api/place/children", { path: [] })).body;
@@ -280,13 +309,17 @@ describe.skipIf(!luneAvailable)("end to end", () => {
   });
 
   it("keeps earlier asset versions and restores one as a new version", async () => {
-    const v1 = (await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", spec: { name: "Greeter", kind: "Script", source: "print('v1')" } }) })).body;
-    await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", replaceId: v1.id, spec: { name: "Greeter", kind: "Script", source: "print('v2')\nprint('more')" } }) });
+    // Scripts aren't library assets anymore.
+    expect((await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", spec: { name: "Greeter", kind: "Script", source: "print('v1')" } }) })).status).toBe(400);
+    const block = (name: string) => ({ name, size: [2, 2, 2], pos: [0, 1, 0], color: "#888888" });
+    const v1 = (await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "model", spec: { name: "Crate", parts: [block("A")] } }) })).body;
+    await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "model", replaceId: v1.id, spec: { name: "Crate", parts: [block("A"), { ...block("B"), pos: [0, 3, 0] }] } }) });
     const versions = (await api(`/api/assets/${v1.id}/versions`)).body;
     expect(versions.map((v: { version: number; current: boolean; size: number }) => [v.version, v.current, v.size])).toEqual([[2, true, 2], [1, false, 1]]);
 
     const restored = (await api(`/api/assets/${v1.id}/restore`, { method: "POST", body: JSON.stringify({ version: 1 }) })).body;
-    expect(restored).toMatchObject({ version: 3, spec: { source: "print('v1')" } });
+    expect(restored).toMatchObject({ version: 3, spec: { parts: [expect.objectContaining({ name: "A" })] } });
+    expect(restored.spec.parts).toHaveLength(1);
     expect((await api(`/api/assets/${v1.id}/versions`)).body.map((v: { version: number }) => v.version)).toEqual([3, 2, 1]);
     expect((await api(`/api/assets/${v1.id}/restore`, { method: "POST", body: JSON.stringify({ version: 9 }) })).status).toBe(404);
   });

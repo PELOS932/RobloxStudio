@@ -15,6 +15,7 @@ import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
 import { AnimationSpecSchema, sanitizeAnimationSpec } from "../shared/animation.ts";
+import { sanitizeVfxSpec, VfxSpecSchema } from "../shared/vfx.ts";
 import { parseAutoCompact } from "../shared/context.ts";
 import type { Asset } from "../shared/assets.ts";
 import type { BootState, ClientEvent, ServerEvent, Settings, StudioStatus } from "../shared/protocol.ts";
@@ -151,12 +152,17 @@ api.post("/assets", (req, res) => {
       asset.html = { source: String(html.source), width: Number(html.width) || 1280, height: Number(html.height) || 720, autoScale: html.autoScale !== false };
     }
   } else if (kind === "script") {
+    // Scripts go straight into Studio now; only older script assets can still be edited.
+    if (!prev) return void res.status(400).json({ error: "Scripts aren't kept in the library: they go straight into Studio." });
     const s = ScriptSpecSchema.parse(spec);
-    asset = { ...base, id: prev?.id ?? shortId("s_"), kind, name: s.name, spec: s };
+    asset = { ...base, id: prev.id, kind, name: s.name, spec: s };
   } else if (kind === "animation") {
     const s = sanitizeAnimationSpec(AnimationSpecSchema.parse(spec));
     asset = { ...base, id: prev?.id ?? shortId("a_"), kind, name: s.name, spec: s, ...(s.description ? { description: s.description } : {}) };
-  } else return void res.status(400).json({ error: "kind must be model, ui, script or animation" });
+  } else if (kind === "vfx") {
+    const s = sanitizeVfxSpec(VfxSpecSchema.parse(spec));
+    asset = { ...base, id: prev?.id ?? shortId("v_"), kind, name: s.name, spec: s, ...(s.description ? { description: s.description } : {}) };
+  } else return void res.status(400).json({ error: "kind must be model, ui, animation or vfx" });
   res.json(assets.put(asset, true));
 });
 
@@ -211,6 +217,21 @@ api.post("/animations/starters", (_req, res) => {
     const spec = sanitizeAnimationSpec(AnimationSpecSchema.parse(raw));
     const asset: Asset = {
       id: shortId("a_"), kind: "animation", name: spec.name, spec, createdAt: now + i, updatedAt: now + i, version: 1, origin: "user",
+      ...(spec.description ? { description: spec.description } : {}), ...(games.currentId ? { gameId: games.currentId } : {}),
+    };
+    return assets.put(asset, false).id;
+  });
+  res.json({ ids: created });
+});
+
+/** Add the bundled starter effects (campfire, aura, explosion, portal…) to the library. */
+api.post("/vfx/starters", (_req, res) => {
+  const list = JSON.parse(readFileSync(join(ROOT, "examples", "starter-vfx.json"), "utf8")) as unknown[];
+  const now = Date.now();
+  const created = list.map((raw, i) => {
+    const spec = sanitizeVfxSpec(VfxSpecSchema.parse(raw));
+    const asset: Asset = {
+      id: shortId("v_"), kind: "vfx", name: spec.name, spec, createdAt: now + i, updatedAt: now + i, version: 1, origin: "user",
       ...(spec.description ? { description: spec.description } : {}), ...(games.currentId ? { gameId: games.currentId } : {}),
     };
     return assets.put(asset, false).id;

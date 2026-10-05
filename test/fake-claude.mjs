@@ -178,6 +178,29 @@ for await (const line of createInterface({ input: process.stdin })) {
     const animId = res.content[0].text.match(/\b(a_[a-z0-9]{6})\b/)?.[1];
     await toolCall("edit_animation", { id: animId, speed: 2, keyframes: [{ t: 0.5, poses: { neck: [0, 20, 0] } }] });
     streamText("Done.");
+  } else if (/effect/i.test(prompt)) {
+    // Effects, scripts and the Studio power tools, the way Claude would chain them.
+    streamText("Making a portal effect and wiring it up.");
+    const res = await toolCall("create_vfx", {
+      name: "Mini Portal",
+      emitters: [
+        { name: "Swirl", type: "particles", pos: [0, 4, 0], texture: "vortex", color: ["#7ffff0", "#1a8cff"], size: [[0, 4], [1, 2]], transparency: [0.2, 1], lifetime: 1.2, rate: 8, speed: 0, spin: [160, 220], lightEmission: 1 },
+        { name: "Light", type: "light", pos: [0, 4, 0], color: "#4fe8ff", brightness: 2, range: 12 },
+      ],
+    });
+    const vfxId = res.content[0].text.match(/\b(v_[a-z0-9]{6})\b/)?.[1];
+    await toolCall("edit_vfx", { id: vfxId, update: [{ name: "Swirl", rate: 12 }], add: [{ name: "Glints", type: "sparkles", pos: [0, 4, 0], color: "#c8fffb" }] });
+    await toolCall("create_script", {
+      scripts: [
+        { name: "PortalTouch", kind: "Script", parent: "ServerScriptService", source: "print('portal ready')" },
+        { name: "PortalConfig", kind: "ModuleScript", parent: "ReplicatedStorage", source: "return { cooldown = 2 }" },
+      ],
+    });
+    await toolCall("studio_edit", { ops: [{ op: "create", class: "Part", name: "PortalPad", parent: "Workspace", props: { Size: [8, 1, 8], Color: "#1a8cff", Material: "Neon", Position: [0, 0.5, 0] } }] });
+    await toolCall("studio_query", { path: "Workspace", name: "PortalPad", props: ["Size", "Material"] });
+    await toolCall("studio_lighting", { preset: "night" });
+    await toolCall("studio_playtest", { seconds: 1 });
+    streamText("Done.");
   } else if (/lantern/i.test(prompt)) {
     streamText("Building a lantern.");
     await toolCall("create_model", lantern);

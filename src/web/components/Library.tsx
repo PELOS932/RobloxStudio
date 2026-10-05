@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  createGame, deleteAsset, deleteGame, importAsset, openAsset, renameGame, setRightTab, toast, updateAssetMeta, useStore,
+  createGame, deleteAsset, deleteGame, importAsset, openAsset, renameGame, setLibraryTab, setRightTab, toast, updateAssetMeta, useStore,
+  type LibraryTab,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
-import { Icon } from "../lib/icons.tsx";
-import { sizeLabel, type AssetKind, type AssetSummary } from "../../shared/assets.ts";
+import { Icon, type IconName } from "../lib/icons.tsx";
+import { LIBRARY_KINDS, sizeLabel, type AssetKind, type AssetSummary } from "../../shared/assets.ts";
 import type { Asset, Game } from "../../shared/protocol.ts";
 import { AssetThumb } from "./AssetThumb.tsx";
+import { AnimatePanel } from "./AnimatePanel.tsx";
+import { VfxPanel } from "./VfxPanel.tsx";
 
-// The asset library, organized by game (Studio place). New assets are filed under the game
-// open in Studio. Model previews come from cached images and turn around on hover.
+// The library, organized by game (Studio place), with Models, Animations and VFX tabs. New assets
+// are filed under the game open in Studio. Model previews come from cached images and turn around
+// on hover. Scripts go straight into Studio and UIs live in the preview, so neither is listed here.
 
-type Kind = "all" | AssetKind;
+const inLibrary = (a: AssetSummary) => (LIBRARY_KINDS as readonly string[]).includes(a.kind);
 
 function localGet(key: string) {
   try {
@@ -44,30 +48,20 @@ export function Library() {
   const currentGameId = useStore((s) => s.currentGameId);
   const selection = useStore((s) => s.libraryGame);
   const studio = useStore((s) => s.studio);
-  const activeId = useStore((s) => s.activeAssetId);
-  const [kind, setKind] = useState<Kind>("all");
-  const [q, setQ] = useState("");
-  const [view, setView] = useState<"grid" | "list">(() => (localGet("forge.libraryView") === "list" ? "list" : "grid"));
-  const [hover, setHover] = useState<string | null>(null);
+  const tab = useStore((s) => s.libraryTab);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pulling, setPulling] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
 
   const studioReady = studio.state === "connected" && !!studio.studioId;
   // "open" follows the game open in Studio (everything when no place is open).
   const filter = selection === "open" ? currentGameId ?? "all" : selection === "all" || selection === "none" || games.some((g) => g.id === selection) ? selection : "all";
   const gameName = (id?: string) => (id ? games.find((g) => g.id === id)?.name : undefined);
   const inGame = (a: AssetSummary) => filter === "all" || (filter === "none" ? !a.gameId || !gameName(a.gameId) : a.gameId === filter);
-
-  const { list, elsewhere } = useMemo(() => {
-    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = (a: AssetSummary) =>
-      (kind === "all" || a.kind === kind) &&
-      terms.every((t) => a.name.toLowerCase().includes(t) || !!a.description?.toLowerCase().includes(t) || !!gameName(a.gameId)?.toLowerCase().includes(t));
-    const all = assets.filter(matches);
-    const list = all.filter(inGame);
-    return { list, elsewhere: terms.length ? all.length - list.length : 0 };
-  }, [assets, games, q, kind, filter]);
+  const byKind = useMemo(() => {
+    const out: Record<AssetKind, AssetSummary[]> = { model: [], animation: [], vfx: [], ui: [], script: [] };
+    for (const a of assets) if (inGame(a)) out[a.kind].push(a);
+    return out;
+  }, [assets, games, filter]);
 
   const pull = async () => {
     setPulling(true);
@@ -83,25 +77,65 @@ export function Library() {
   };
 
   const title = filter === "all" ? "All games" : filter === "none" ? "Unfiled" : gameName(filter) ?? "All games";
+  const tabs: [LibraryTab, string, IconName, number][] = [
+    ["models", "Models", "cube", byKind.model.length],
+    ["animations", "Animations", "anim", byKind.animation.length],
+    ["vfx", "VFX", "flame", byKind.vfx.length],
+  ];
 
   return (
     <div className="lib">
       <div className="lib-head">
         <GameSwitcher filter={filter} title={title} />
         <span style={{ flex: 1 }} />
-        {studioReady && (
-          <button className="btn small" disabled={pulling} title="Save what's selected in Studio (parts, models or GUIs) to this library" onClick={() => void pull()}>
+        {studioReady && tab === "models" && (
+          <button className="btn small" disabled={pulling} title="Save what's selected in Studio (parts or models) to this library" onClick={() => void pull()}>
             {pulling ? <span className="spinner" /> : <Icon name="download" size={13} />} <span className="long">Save Studio selection</span>
           </button>
         )}
         <AddMenu onJson={() => setPasteOpen((v) => !v)} />
       </div>
+      <div className="lib-subtabs" role="tablist" aria-label="Library">
+        {tabs.map(([id, label, icon, n]) => (
+          <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setLibraryTab(id)}>
+            <Icon name={icon} size={14} /> {label} <span className="count">{n}</span>
+          </button>
+        ))}
+      </div>
+      {pasteOpen && <PasteJson onDone={() => setPasteOpen(false)} />}
+      {tab === "models" && <ModelGrid items={byKind.model} all={assets} filter={filter} title={title} gameName={gameName} />}
+      {tab === "animations" && <AnimatePanel items={byKind.animation} />}
+      {tab === "vfx" && <VfxPanel items={byKind.vfx} />}
+    </div>
+  );
+}
+
+function ModelGrid({ items, all, filter, title, gameName }: {
+  items: AssetSummary[]; all: AssetSummary[]; filter: string; title: string; gameName: (id?: string) => string | undefined;
+}) {
+  const activeId = useStore((s) => s.activeAssetId);
+  const [q, setQ] = useState("");
+  const [view, setView] = useState<"grid" | "list">(() => (localGet("forge.libraryView") === "list" ? "list" : "grid"));
+  const [hover, setHover] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const { list, elsewhere } = useMemo(() => {
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = (a: AssetSummary) =>
+      terms.every((t) => a.name.toLowerCase().includes(t) || !!a.description?.toLowerCase().includes(t) || !!gameName(a.gameId)?.toLowerCase().includes(t));
+    const list = items.filter(matches);
+    const everywhere = terms.length ? all.filter((a) => a.kind === "model" && matches(a)).length : 0;
+    return { list, elsewhere: Math.max(0, everywhere - list.length) };
+  }, [items, all, q]);
+
+  return (
+    <>
       <div className="lib-tools">
         <div className="lib-search">
           <Icon name="search" size={13} />
           <input
             ref={searchRef}
-            placeholder={`Search ${filter === "all" ? "every game" : title}`}
+            placeholder={`Search models in ${filter === "all" ? "every game" : title}`}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setQ("")}
@@ -111,13 +145,6 @@ export function Library() {
               <Icon name="x" size={12} />
             </button>
           )}
-        </div>
-        <div className="seg">
-          {(["all", "model", "ui", "script", "animation"] as const).map((k) => (
-            <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
-              {k === "all" ? "All" : k === "model" ? "Models" : k === "ui" ? "UI" : k === "script" ? "Scripts" : "Anims"}
-            </button>
-          ))}
         </div>
         <button
           className="icon-btn"
@@ -131,12 +158,11 @@ export function Library() {
           <Icon name={view === "grid" ? "layout" : "grid"} size={15} />
         </button>
       </div>
-      {pasteOpen && <PasteJson onDone={() => setPasteOpen(false)} />}
       <div className={`lib-body ${view}`}>
         {list.length === 0 && (
           <div className="lib-empty">
-            <div className="big">{q ? `Nothing in ${title} matches "${q}"` : `No ${kind === "all" ? "assets" : kind === "model" ? "models" : kind === "ui" ? "UIs" : "scripts"} in ${title} yet`}</div>
-            <div>{q ? "" : "Ask Claude to build something, save your Studio selection, or move assets here from another game."}</div>
+            <div className="big">{q ? `No models in ${title} match "${q}"` : `No models in ${title} yet`}</div>
+            <div>{q ? "" : "Ask Claude to build something, save your Studio selection, or move models here from another game."}</div>
           </div>
         )}
         {list.map((a) => (
@@ -145,7 +171,7 @@ export function Library() {
             asset={a}
             view={view}
             active={a.id === activeId}
-            spin={hover === a.id && (a.kind === "model" || a.kind === "animation")}
+            spin={hover === a.id}
             game={filter === "all" ? gameName(a.gameId) : undefined}
             onHover={(on) => setHover(on ? a.id : null)}
           />
@@ -156,7 +182,7 @@ export function Library() {
           </button>
         )}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -184,7 +210,7 @@ function GameSwitcher({ filter, title }: { filter: string; title: string }) {
   const assets = useStore((s) => s.assets);
   const currentGameId = useStore((s) => s.currentGameId);
   const { open, setOpen, ref } = useMenu();
-  const count = (id: string) => assets.filter((a) => (id === "all" ? true : id === "none" ? !a.gameId || !games.some((g) => g.id === a.gameId) : a.gameId === id)).length;
+  const count = (id: string) => assets.filter((a) => inLibrary(a) && (id === "all" ? true : id === "none" ? !a.gameId || !games.some((g) => g.id === a.gameId) : a.gameId === id)).length;
   const choose = (id: string) => {
     useStore.setState({ libraryGame: id === currentGameId ? "open" : id });
     setOpen(false);
@@ -288,9 +314,7 @@ function Card({ asset: a, view, active, spin, game, onHover }: {
   asset: AssetSummary; view: "grid" | "list"; active: boolean; spin: boolean; game?: string; onHover: (on: boolean) => void;
 }) {
   const inStudio = a.lastImport && a.lastImport.version === a.version;
-  const meta = a.kind === "animation"
-    ? `Animation · ${a.detail ?? sizeLabel(a.kind, a.size)} · ${timeAgo(a.updatedAt)}`
-    : `${a.kind === "model" ? "Model" : a.kind === "ui" ? "UI" : "Script"} · ${sizeLabel(a.kind, a.size)} · ${timeAgo(a.updatedAt)}`;
+  const meta = `${sizeLabel(a.kind, a.size)} · ${timeAgo(a.updatedAt)}`;
   return (
     <div
       className={`lib-card ${active ? "active" : ""}`}
@@ -394,8 +418,8 @@ function CardMenu({ asset: a }: { asset: AssetSummary }) {
               >
                 <Icon name="pencil" size={14} /> Rename…
               </button>
-              <button onClick={() => (close(), (location.href = `/api/assets/${a.id}/export?format=${a.kind === "script" ? "luau" : "rbxmx"}`))}>
-                <Icon name="download" size={14} /> Download {a.kind === "script" ? ".luau" : ".rbxmx"}
+              <button onClick={() => (close(), (location.href = `/api/assets/${a.id}/export?format=rbxmx`))}>
+                <Icon name="download" size={14} /> Download .rbxmx
               </button>
               <div className="menu-sep" />
               <button className="danger" onClick={() => (close(), confirm(`Delete "${a.name}"? This only removes it from Studio Forge.`) && void deleteAsset(a.id))}>
@@ -414,7 +438,7 @@ function PasteJson({ onDone }: { onDone: () => void }) {
   const submit = async () => {
     try {
       const parsed = JSON.parse(text);
-      const kind = parsed.kind ?? (parsed.parts ? "model" : parsed.nodes ? "ui" : parsed.source ? "script" : undefined);
+      const kind = parsed.kind ?? (parsed.parts ? "model" : parsed.nodes ? "ui" : parsed.emitters ? "vfx" : parsed.keyframes ? "animation" : undefined);
       const spec = parsed.spec ?? parsed;
       const asset = await api<Asset>("/assets", { body: { kind, spec } });
       openAsset(asset.id);
@@ -425,7 +449,7 @@ function PasteJson({ onDone }: { onDone: () => void }) {
   };
   return (
     <div className="lib-paste">
-      <textarea className="console-input" placeholder='Paste a Studio Forge JSON export ({"kind":"model","spec":{...}})' value={text} onChange={(e) => setText(e.target.value)} />
+      <textarea className="console-input" placeholder='Paste a Studio Forge JSON export ({"kind":"model" | "animation" | "vfx" | "ui","spec":{...}})' value={text} onChange={(e) => setText(e.target.value)} />
       <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn ghost" onClick={onDone}>Cancel</button>
         <button className="btn primary" onClick={submit} disabled={!text.trim()}>Add asset</button>
