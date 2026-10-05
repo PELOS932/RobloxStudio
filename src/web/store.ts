@@ -27,6 +27,8 @@ interface State {
   limits: PlanUsage | null;
   /** Progress of a running map transfer from Studio (Place tab). */
   placeProgress: string | null;
+  /** `claude update` is running. */
+  claudeUpdating: boolean;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -61,6 +63,7 @@ export const useStore = create<State>(() => ({
   queues: {},
   limits: null,
   placeProgress: null,
+  claudeUpdating: false,
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -360,6 +363,25 @@ export async function exportConversation(id: string) {
   a.download = `${conv.title.replace(/[^\w -]+/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "chat"}.md`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/** Errors that `claude update` fixes, e.g. "Claude Code 2.1.278 does not support this model". */
+export const CLI_OUTDATED = /does not support this model|or newer is required|run ['"\u2018\u2019]?claude update/i;
+
+export async function updateClaudeCode() {
+  if (get().claudeUpdating) return;
+  set({ claudeUpdating: true });
+  toast("Updating Claude Code…");
+  try {
+    const r = await api<{ ok: boolean; output: string; before?: string; version?: string }>("/claude/update", { method: "POST" });
+    if (r.ok && r.version && r.version !== r.before) toast(`Claude Code updated to ${r.version}. Send your message again.`, "success");
+    else if (r.ok) toast(`Claude Code ${r.version ?? ""} is already the newest version.`.replace("  ", " "), "info");
+    else toast(`Claude Code couldn't update itself: ${r.output.split("\n").filter(Boolean).pop() ?? "unknown error"}. Run "claude update" in a terminal.`, "error");
+  } catch (err) {
+    toast(String(err), "error");
+  } finally {
+    set({ claudeUpdating: false });
+  }
 }
 
 export async function updateSettings(patch: Partial<Settings>) {

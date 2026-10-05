@@ -2,7 +2,8 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type React
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage, updateSettings, useStore,
+  CLI_OUTDATED, deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage,
+  updateClaudeCode, updateSettings, useStore,
 } from "../store.ts";
 import { Icon, type IconName } from "../lib/icons.tsx";
 import { api } from "../lib/api.ts";
@@ -381,6 +382,35 @@ function segments(blocks: Block[]): Segment[] {
   return out;
 }
 
+/** The local Claude Code is too old for the chosen model: offer `claude update` right here. */
+function CliOutdated({ model, error, onRetry }: { model?: string; error: string; onRetry?: () => void }) {
+  const updating = useStore((s) => s.claudeUpdating);
+  const version = useStore((s) => s.claude.version);
+  const old = error.match(/Claude Code (\S+) does not support/)?.[1];
+  if (old && version && version !== old) {
+    return (
+      <div className="msg-fix">
+        <span>Claude Code is now {version}.</span>
+        {onRetry && (
+          <button className="btn small primary" onClick={onRetry}>
+            <Icon name="refresh" size={13} /> Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="msg-fix">
+      <span>
+        Claude Code{old ? ` ${old}` : version ? ` ${version}` : ""} on this computer is too old for {model ?? "this model"}. Update it, then send your message again.
+      </span>
+      <button className="btn small primary" disabled={updating} onClick={() => void updateClaudeCode()}>
+        {updating ? <span className="spinner" /> : <Icon name="download" size={13} />} {updating ? "Updating…" : "Update Claude Code"}
+      </button>
+    </div>
+  );
+}
+
 const MessageView = memo(function MessageView({ message, live, isLast, onRetry }: { message: ChatMessage; live: boolean; isLast: boolean; onRetry?: () => void }) {
   if (message.role === "user") return <UserMessage message={message} />;
 
@@ -420,6 +450,7 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
           <span>{message.error}</span>
         </div>
       )}
+      {isLast && !live && CLI_OUTDATED.test(`${message.error ?? ""}\n${text}`) && <CliOutdated model={model} error={`${message.error ?? ""}\n${text}`} onRetry={onRetry} />}
       {message.interrupted && <div className="msg-note">Stopped.</div>}
       {!live && (
         <div className="msg-meta">

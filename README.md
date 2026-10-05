@@ -169,6 +169,10 @@ The tests that execute generated Luau need [Lune](https://lune-org.github.io/doc
 - The HTML translation test drives a real Chromium (via `playwright-core`; set `CHROMIUM_PATH` if it isn't found, otherwise it's skipped). It translates `test/html/hud.html` through the `create_ui_html` tool, checks anchoring, names and styling, applies an `edit_ui_html` edit, and confirms the result builds identical instances via Luau and `.rbxmx`.
 - You can point **Settings → Roblox Studio** at `npm run mock-studio` to try the app without Studio.
 
+## Troubleshooting
+
+- **"Claude Code X does not support this model; version Y or newer is required."** New Claude models need a recent Claude Code. Click **Update Claude Code** under the error (or **Settings → Claude account → Update**, or run `claude update` in a terminal), then **Try again**. Open chats switch to the new version with their next message. If the update fails because of permissions, run `npm i -g @anthropic-ai/claude-code@latest` in a terminal (as administrator on Windows), or pick another model in the composer.
+
 ## Status and limitations
 
 - Not yet tested against a live Roblox Studio. Conversions are verified with Lune (Roblox's reflection database): 3D models are imported part by part and checked against Roblox's own `CFrame.Angles` math (every shape, cylinder axis, rotation, material, light and group), then pulled back and re-imported to the same parts. The Studio MCP integration follows the tool schemas of Studio's built-in server and was exercised against the mock server. Please report anything that behaves differently in real Studio.

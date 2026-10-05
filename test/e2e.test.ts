@@ -227,6 +227,22 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(Number(r.output)).toBeGreaterThanOrEqual(1);
   });
 
+  it("updates an outdated Claude Code and moves the chat onto the new version", async () => {
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "is claude too old?" }));
+    const failed = await waitFor("message", (e) => e.convId === conv.id && /does not support this model/.test(e.message.error ?? ""));
+    expect(failed.message.error).toMatch(/Run 'claude update'/);
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle");
+
+    const r = (await api("/api/claude/update", { method: "POST" })).body;
+    expect(r).toMatchObject({ ok: true, before: "9.9.9", version: "9.9.10" });
+    await waitFor("claude", (e) => e.status.version === "9.9.10");
+
+    // The idle chat process was restarted, so the retry runs on the new version.
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "is claude too old now?" }));
+    await waitFor("message", (e) => e.convId === conv.id && e.message.blocks.some((b) => b.type === "text" && b.text === "Running on Claude Code 9.9.10."));
+  });
+
   it("rejects cross-site and unauthenticated requests", async () => {
     expect((await api("/api/state", { headers: { origin: "https://evil.example" } })).status).toBe(403);
     const plain = await fetch(`${BASE}/api/studio/run`, { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });

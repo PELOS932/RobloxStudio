@@ -261,6 +261,7 @@ api.post("/studio/screenshot", wrap(async (_req, res) => {
 
 // Claude Code ---------------------------------------------------------------
 api.post("/claude/refresh", wrap(async (_req, res) => res.json(await claude.refreshStatus())));
+api.post("/claude/update", wrap(async (_req, res) => res.json(await claude.updateCli())));
 api.post("/claude/limits", wrap(async (_req, res) => res.json({ limits: await claude.checkLimits() })));
 api.post("/claude/login", (req, res) => {
   claude.startLogin(req.body?.method === "console" ? "console" : "claudeai");

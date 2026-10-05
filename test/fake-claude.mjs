@@ -2,7 +2,8 @@
 // Minimal stand-in for `claude -p --input-format stream-json --output-format stream-json`
 // used by the end-to-end test. It speaks the same event format and calls the Forge MCP
 // tools over HTTP exactly like Claude Code would.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,8 +14,16 @@ const arg = (name) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
+// `claude update` moves the fake from 9.9.9 to 9.9.10 (remembered in the app's data dir).
+const updatedMarker = join(process.env.FORGE_DATA_DIR ?? ".", "fake-claude-updated");
+const VERSION = existsSync(updatedMarker) ? "9.9.10" : "9.9.9";
 if (args.includes("--version")) {
-  console.log("9.9.9 (Fake Claude Code)");
+  console.log(`${VERSION} (Fake Claude Code)`);
+  process.exit(0);
+}
+if (args[0] === "update") {
+  writeFileSync(updatedMarker, "1");
+  console.log(`Current version: ${VERSION}\nSuccessfully updated from ${VERSION} to version 9.9.10`);
   process.exit(0);
 }
 if (args[0] === "auth" && args[1] === "status") {
@@ -104,6 +113,18 @@ for await (const line of createInterface({ input: process.stdin })) {
     out({ type: "system", subtype: "init", model: arg("--model"), tools: [], mcp_servers: [{ name: "forge", status: "connected" }] });
   }
   const started = Date.now();
+  if (/too old/i.test(prompt) && VERSION === "9.9.9") {
+    // What Claude Code prints when the chosen model needs a newer CLI.
+    const error = "API Error: 400 Claude Code 9.9.9 does not support this model; version 9.9.10 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.";
+    out({ type: "assistant", message: { id: `msg_${++apiCount}`, content: [{ type: "text", text: error }] }, parent_tool_use_id: null });
+    out({ type: "result", subtype: "success", is_error: true, result: error, num_turns: 1, duration_ms: 1, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } });
+    continue;
+  }
+  if (/too old/i.test(prompt)) {
+    streamText(`Running on Claude Code ${VERSION}.`);
+    out({ type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, duration_ms: 1, total_cost_usd: 0.001, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 1, cache_creation_input_tokens: 0 } });
+    continue;
+  }
   if (/html hud/i.test(prompt)) {
     const html = readFileSync(new URL("./html/hud.html", import.meta.url), "utf8");
     streamText("Designing the HUD in HTML.");

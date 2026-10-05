@@ -120,6 +120,8 @@ class ClaudeSession {
   private emitTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private resumeRetried = false;
+  /** Restart the CLI before the next message (it was updated mid-turn). */
+  restartNext = false;
   private sawOutput = false;
 
   constructor(readonly convId: string, private deps: ClaudeDeps) {}
@@ -224,7 +226,7 @@ class ClaudeSession {
 
     const settings = this.deps.getSettings();
     const fp = fingerprint(settings);
-    if (this.proc && this.fingerprint !== fp) this.kill();
+    if (this.proc && (this.fingerprint !== fp || this.restartNext)) this.kill();
     if (!this.proc) {
       this.setStatus("starting");
       try {
@@ -490,6 +492,9 @@ class ClaudeSession {
     }
     if (r.is_error || (typeof r.subtype === "string" && r.subtype.startsWith("error"))) {
       turn.msg.error = typeof r.result === "string" && r.result ? r.result : r.subtype;
+      // Claude Code also prints API errors as a reply; show them once, as the error.
+      const last = turn.msg.blocks[turn.msg.blocks.length - 1];
+      if (last?.type === "text" && last.text.trim() === String(turn.msg.error).trim()) turn.msg.blocks.pop();
     } else if (!turn.msg.blocks.some((b) => b.type === "text") && typeof r.result === "string" && r.result.trim()) {
       turn.msg.blocks.push({ type: "text", text: r.result });
     }
@@ -549,6 +554,7 @@ class ClaudeSession {
   kill() {
     const p = this.proc;
     this.proc = null;
+    this.restartNext = false;
     if (p && p.exitCode === null) {
       p.stdin?.end();
       p.kill();
@@ -707,6 +713,36 @@ export class ClaudeManager {
       apiProvider: parsed.apiProvider,
     });
     return this.status;
+  }
+
+  private updating: Promise<{ ok: boolean; output: string; before?: string; version?: string }> | null = null;
+
+  /**
+   * Run `claude update`. New models need recent Claude Code versions ("Claude Code X does not
+   * support this model"). Chats switch to the new version with their next message.
+   */
+  updateCli() {
+    this.updating ??= (async () => {
+      const settings = this.deps.getSettings();
+      const before = this.status.version;
+      let ok = true;
+      let output = "";
+      try {
+        output = await runCapture(settings.claudePath, ["update"], cliEnv(settings), 300_000);
+      } catch (err) {
+        ok = false;
+        output = err instanceof Error ? err.message : String(err);
+      }
+      const { version } = await this.refreshStatus();
+      if (version && version !== before) {
+        for (const s of this.sessions.values()) {
+          if (s.status === "idle") s.kill();
+          else s.restartNext = true;
+        }
+      }
+      return { ok, output: stripAnsi(output).trim().slice(-2000), before, version };
+    })().finally(() => (this.updating = null));
+    return this.updating;
   }
 
   /** Run `claude auth login` and stream its output (sign-in URL, prompts) to the browser. */

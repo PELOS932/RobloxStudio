@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../lib/api.ts";
 import { Icon } from "../lib/icons.tsx";
-import { toast, updateSettings, useStore } from "../store.ts";
+import { toast, updateClaudeCode, updateSettings, useStore } from "../store.ts";
 import { MODELS } from "./Chat.tsx";
 import { PlanUsageCard } from "./PlanUsage.tsx";
 import type { Settings } from "../../shared/protocol.ts";
@@ -112,6 +112,7 @@ function General({ s }: { s: Settings }) {
 
 function Account() {
   const claude = useStore((s) => s.claude);
+  const updating = useStore((s) => s.claudeUpdating);
   const lines = useStore((s) => s.loginLines);
   const running = useStore((s) => s.loginRunning);
   const [input, setInput] = useState("");
@@ -137,6 +138,11 @@ function Account() {
           <span className={`dot ${claude.cli === "ok" ? (claude.loggedIn ? "ok" : "err") : claude.cli === "missing" ? "err" : ""}`} />
           Claude Code
           <span style={{ flex: 1 }} />
+          {claude.cli === "ok" && (
+            <button className="btn small" disabled={updating} title="Run claude update: new models need a recent Claude Code" onClick={() => void updateClaudeCode()}>
+              {updating ? <span className="spinner" /> : <Icon name="download" size={13} />} {updating ? "Updating…" : "Update"}
+            </button>
+          )}
           <button className="btn small" onClick={() => void api("/claude/refresh", { method: "POST" })}>
             <Icon name="refresh" size={13} /> Re-check
           </button>
