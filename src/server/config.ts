@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Settings } from "../shared/protocol.ts";
+import { parseAutoCompact } from "../shared/context.ts";
 
 export const ROOT = resolve(import.meta.dirname, "../..");
 
@@ -66,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoApproveLuau: false,
   autoImport: true,
   longCache: true,
+  autoCompact: 200_000,
   claudePath: process.env.CLAUDE_PATH ?? "claude",
   workspaceDir: join(DATA_DIR, "workspace"),
   studio: { command: "", args: [], autoConnect: true },
@@ -80,6 +82,7 @@ export function loadSettings(): Settings {
     return {
       ...DEFAULT_SETTINGS,
       ...raw,
+      autoCompact: parseAutoCompact(raw.autoCompact) ?? DEFAULT_SETTINGS.autoCompact,
       studio: { ...DEFAULT_SETTINGS.studio, ...raw.studio },
       import: { ...DEFAULT_SETTINGS.import, ...raw.import },
     };

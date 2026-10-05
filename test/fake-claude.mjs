@@ -62,6 +62,12 @@ let initSent = false;
 let lastAssetId = "";
 let apiCount = 0;
 
+// Like Claude Code: report the auto-compact window and threshold first (from the environment).
+const env = process.env;
+const window = Math.min(1_000_000, Number(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW) || 1_000_000) - 20_000;
+const pct = Number(env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE) || 80;
+out({ type: "autocompact_state", value: { enabled: env.DISABLE_AUTO_COMPACT !== "1", effective_window: window, threshold: Math.round((window * pct) / 100), enforced: true, source: env.CLAUDE_CODE_AUTO_COMPACT_WINDOW ? "env" : "model-default" } });
+
 function streamText(text) {
   const id = `msg_${++apiCount}`;
   out({ type: "stream_event", event: { type: "message_start", message: { id, usage: { input_tokens: 4, cache_read_input_tokens: 9000, cache_creation_input_tokens: 200 } } }, parent_tool_use_id: null });
@@ -113,6 +119,17 @@ for await (const line of createInterface({ input: process.stdin })) {
     out({ type: "system", subtype: "init", model: arg("--model"), tools: [], mcp_servers: [{ name: "forge", status: "connected" }] });
   }
   const started = Date.now();
+  if (/^\/compact\b/.test(prompt)) {
+    // What Claude Code does for /compact: status, boundary, synthetic summary, empty result.
+    out({ type: "system", subtype: "status", status: "compacting" });
+    await new Promise((r) => setTimeout(r, 150));
+    out({ type: "system", subtype: "status", status: null });
+    out({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 9204, post_tokens: 1830, duration_ms: 150 } });
+    out({ type: "user", message: { role: "user", content: "This session is being continued from a previous conversation…" }, isSynthetic: true });
+    out({ type: "user", message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" } });
+    out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, duration_ms: 150, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } });
+    continue;
+  }
   if (/too old/i.test(prompt) && VERSION === "9.9.9") {
     // What Claude Code prints when the chosen model needs a newer CLI.
     const error = "API Error: 400 Claude Code 9.9.9 does not support this model; version 9.9.10 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.";

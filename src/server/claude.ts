@@ -15,8 +15,9 @@ import { bus, conversations, shortId } from "./store.ts";
 import { DATA_DIR, MCP_TOKEN } from "./config.ts";
 import { FORGE_SYSTEM_PROMPT } from "./system-prompt.ts";
 import type { ForgeMcp } from "./forge-mcp.ts";
+import { compactEnv } from "../shared/context.ts";
 import type {
-  Block, ChatMessage, ClaudeStatus, Conversation, ConvStatus, PlanUsage, QueuedMessage, Settings, TurnUsage, UsageWindow,
+  Block, ChatMessage, ClaudeStatus, ContextState, Conversation, ConvStatus, PlanUsage, QueuedMessage, Settings, TurnUsage, UsageWindow,
 } from "../shared/protocol.ts";
 
 const IDLE_KILL_MS = 20 * 60_000;
@@ -91,6 +92,10 @@ export function cliEnv(settings: Settings): NodeJS.ProcessEnv {
   env.MCP_TOOL_TIMEOUT = "900000"; // permission prompts and Studio imports can take a while
   if (settings.longCache) env.ENABLE_PROMPT_CACHING_1H = "1";
   else delete env.ENABLE_PROMPT_CACHING_1H;
+  for (const [k, v] of Object.entries(compactEnv(settings.autoCompact))) {
+    if (v === null) delete env[k];
+    else env[k] = v;
+  }
   return env;
 }
 
@@ -122,6 +127,8 @@ class ClaudeSession {
   private resumeRetried = false;
   /** Restart the CLI before the next message (it was updated mid-turn). */
   restartNext = false;
+  /** Auto-compact state Claude Code reported for this conversation. */
+  context: ContextState | null = null;
   private sawOutput = false;
 
   constructor(readonly convId: string, private deps: ClaudeDeps) {}
@@ -203,6 +210,11 @@ class ClaudeSession {
     }
     const conv = this.conv;
     if (!conv) return;
+    const compact = p.text.trim().match(/^\/compact(?:\s+([\s\S]*))?$/);
+    if (compact && !p.images?.length) {
+      this.compactNow(compact[1]?.trim() ?? "");
+      return;
+    }
     const user: ChatMessage = {
       id: shortId("msg_"),
       role: "user",
@@ -222,6 +234,33 @@ class ClaudeSession {
     for (const img of p.images ?? []) {
       content.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } });
     }
+    this.deliver(content);
+  }
+
+  /** Summarize the conversation so far (Claude Code's /compact), shown as a divider in the chat. */
+  private compactNow(instructions: string) {
+    const conv = this.conv!;
+    if (!conv.claudeSessionId && !this.proc) {
+      bus.emitEvent({ type: "toast", level: "info", message: "Nothing to compact yet: this chat has no Claude context." });
+      this.next();
+      return;
+    }
+    const msg: ChatMessage = {
+      id: shortId("msg_"),
+      role: "assistant",
+      blocks: [{ type: "compact", trigger: "manual", status: "running", startedAt: Date.now() }],
+      createdAt: Date.now(),
+      model: this.deps.getSettings().model,
+    };
+    conv.messages.push(msg);
+    this.turn = new TurnState(msg);
+    conversations.save(conv);
+    this.emitMessage(true);
+    this.setContext({ compacting: true });
+    this.deliver([{ type: "text", text: instructions ? `/compact ${instructions}` : "/compact" }]);
+  }
+
+  private deliver(content: unknown[]) {
     const line = JSON.stringify({ type: "user", message: { role: "user", content }, parent_tool_use_id: null }) + "\n";
 
     const settings = this.deps.getSettings();
@@ -340,13 +379,50 @@ class ClaudeSession {
     });
   }
 
+  private setContext(patch: Partial<ContextState>) {
+    const base = this.context ?? { enabled: true, threshold: 0, window: 0 };
+    this.context = { ...base, ...patch };
+    bus.emitEvent({ type: "context", convId: this.convId, state: this.context });
+  }
+
   private onEvent(obj: any) {
     if (obj.type === "rate_limit_event") {
       this.deps.onLimits?.(obj.rate_limit_info);
       return;
     }
+    if (obj.type === "autocompact_state" && obj.value) {
+      const v = obj.value;
+      this.setContext({ enabled: !!v.enabled, threshold: Number(v.threshold) || 0, window: Number(v.effective_window) || 0, compacting: false });
+      return;
+    }
     const conv = this.conv;
     if (!conv) return;
+    if (obj.type === "system" && obj.subtype === "status") {
+      const compacting = obj.status === "compacting";
+      if (compacting && this.turn && !this.turn.msg.blocks.some((b) => b.type === "compact" && b.status === "running")) {
+        this.turn.msg.blocks.push({ type: "compact", trigger: "auto", status: "running", startedAt: Date.now() });
+        this.emitMessage(true);
+      }
+      if (compacting !== !!this.context?.compacting) this.setContext({ compacting });
+      return;
+    }
+    if (obj.type === "system" && obj.subtype === "compact_boundary") {
+      const m = obj.compact_metadata ?? {};
+      if (this.turn) {
+        const blocks = this.turn.msg.blocks;
+        let b = [...blocks].reverse().find((x): x is Extract<Block, { type: "compact" }> => x.type === "compact" && x.status === "running");
+        if (!b) blocks.push((b = { type: "compact", trigger: "auto", status: "running", startedAt: Date.now() - (m.duration_ms ?? 0) }));
+        b.trigger = m.trigger === "manual" ? "manual" : b.trigger;
+        b.status = "done";
+        b.preTokens = m.pre_tokens;
+        b.postTokens = m.post_tokens;
+        b.endedAt = Date.now();
+        if (typeof m.post_tokens === "number") this.turn.contextTokens = m.post_tokens;
+        this.emitMessage(true);
+      }
+      this.setContext({ compacting: false });
+      return;
+    }
     if (obj.type === "system" && obj.subtype === "init") {
       if (obj.session_id) conv.claudeSessionId = obj.session_id;
       const forge = (obj.mcp_servers ?? []).find((s: any) => s.name === "forge");
@@ -499,17 +575,23 @@ class ClaudeSession {
       turn.msg.blocks.push({ type: "text", text: r.result });
     }
     for (const b of turn.msg.blocks) {
-      if (b.type !== "tool" || b.status !== "running") continue;
-      b.status = "done";
+      if ((b.type !== "tool" && b.type !== "compact") || b.status !== "running") continue;
+      // A compaction that never reached its boundary did not happen ("No messages to compact").
+      b.status = b.type === "compact" ? "error" : "done";
       b.endedAt ??= Date.now();
-      delete b.progress;
+      if (b.type === "tool") delete b.progress;
     }
+    if (this.context?.compacting) this.setContext({ compacting: false });
     this.emitMessage(true);
     this.turn = null;
     this.resumeRetried = false;
     conversations.save(conv, true);
     this.setStatus("idle");
     this.touch();
+    this.next();
+  }
+
+  private next() {
     const next = this.queue.shift();
     if (next) {
       this.emitQueue();
@@ -521,7 +603,7 @@ class ClaudeSession {
     const conv = this.conv;
     if (this.turn) {
       this.turn.msg.error = message;
-      for (const b of this.turn.msg.blocks) if (b.type === "tool" && b.status === "running") b.status = "error";
+      for (const b of this.turn.msg.blocks) if (b.type !== "text" && b.type !== "thinking" && b.status === "running") b.status = "error";
       this.emitMessage(true);
     }
     this.turn = null;
@@ -541,7 +623,7 @@ class ClaudeSession {
     this.deps.forge.cancelPermissions(this.convId);
     if (this.turn) {
       this.turn.msg.interrupted = true;
-      for (const b of this.turn.msg.blocks) if (b.type === "tool" && b.status === "running") b.status = "error";
+      for (const b of this.turn.msg.blocks) if (b.type !== "text" && b.type !== "thinking" && b.status === "running") b.status = "error";
       this.emitMessage(true);
       this.turn = null;
     }
@@ -570,7 +652,7 @@ class ClaudeSession {
 }
 
 function fingerprint(s: Settings): string {
-  return JSON.stringify([s.model, s.effort, s.toolMode, s.autoApproveLuau, s.longCache, s.claudePath, s.workspaceDir]);
+  return JSON.stringify([s.model, s.effort, s.toolMode, s.autoApproveLuau, s.longCache, s.autoCompact, s.claudePath, s.workspaceDir]);
 }
 
 // ---------------------------------------------------------------------------
@@ -672,6 +754,18 @@ export class ClaudeManager {
 
   stop(convId: string) {
     this.sessions.get(convId)?.stop();
+  }
+
+  /** Compact a conversation now (queued behind a running reply). */
+  compact(convId: string, instructions = "") {
+    if (!conversations.get(convId)) throw new Error("Unknown conversation");
+    this.session(convId).send({ text: instructions ? `/compact ${instructions}` : "/compact" });
+  }
+
+  contexts(): Record<string, ContextState> {
+    const out: Record<string, ContextState> = {};
+    for (const [id, s] of this.sessions) if (s.context) out[id] = s.context;
+    return out;
   }
 
   forget(convId: string) {

@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type React
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  CLI_OUTDATED, deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage,
+  CLI_OUTDATED, compactConversation, deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage,
   updateClaudeCode, updateSettings, useStore,
 } from "../store.ts";
 import { Icon, type IconName } from "../lib/icons.tsx";
@@ -12,6 +12,7 @@ import { AssetThumb } from "./AssetThumb.tsx";
 import { LimitNotice } from "./PlanUsage.tsx";
 import { approxTokens, describeCall, fmtDuration, ToolCalls, useNow } from "./ToolCall.tsx";
 import { sizeLabel, type AssetKind } from "../../shared/assets.ts";
+import { expectedThreshold } from "../../shared/context.ts";
 import type { Block, ChatMessage, Effort, TurnUsage } from "../../shared/protocol.ts";
 
 export const MODELS = [
@@ -58,7 +59,7 @@ export function Chat() {
 
   const messages = conv?.messages ?? [];
   const last = messages[messages.length - 1];
-  const lastSize = last ? last.blocks.reduce((n, b) => n + (b.type === "tool" ? (b.result?.text.length ?? 0) + 50 : b.text.length), 0) : 0;
+  const lastSize = last ? last.blocks.reduce((n, b) => n + (b.type === "tool" ? (b.result?.text.length ?? 0) + 50 : b.type === "compact" ? 40 : b.text.length), 0) : 0;
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -212,13 +213,10 @@ function ChatHeader({ running }: { running: boolean }) {
           <span className="spinner" /> working
         </span>
       )}
-      {lastUsage && lastUsage.contextTokens > 0 && (
-        <span className="ctx-stat hide-mobile" title="Tokens in the conversation context (most are served from the prompt cache)">
-          {fmtTokens(lastUsage.contextTokens)} ctx
-        </span>
-      )}
+      {meta && lastUsage && lastUsage.contextTokens > 0 && <ContextMeter convId={meta.id} tokens={lastUsage.contextTokens} />}
       {meta && (
         <ChatMenu
+          onCompact={() => compactConversation(meta.id)}
           onRename={() => (setTitle(meta.title), setEditing(true))}
           onExport={() => void exportConversation(meta.id)}
           onDelete={() => {
@@ -233,7 +231,37 @@ function ChatHeader({ running }: { running: boolean }) {
   );
 }
 
-function ChatMenu({ onRename, onExport, onDelete }: { onRename: () => void; onExport: () => void; onDelete: () => void }) {
+/** Context size against the point where Claude Code compacts it; click to compact now. */
+function ContextMeter({ convId, tokens }: { convId: string; tokens: number }) {
+  const ctx = useStore((s) => s.contexts[convId]);
+  const setting = useStore((s) => s.settings?.autoCompact ?? "auto");
+  const threshold = ctx ? (ctx.enabled ? ctx.threshold : null) : expectedThreshold(setting);
+  const pct = threshold ? Math.min(1, tokens / threshold) : 0;
+  if (ctx?.compacting) {
+    return (
+      <span className="ctx-stat hide-mobile">
+        <span className="spinner" /> compacting
+      </span>
+    );
+  }
+  return (
+    <button
+      className={`ctx-stat ctx-btn hide-mobile ${pct > 0.85 ? "near" : ""}`}
+      title={`${tokens.toLocaleString()} tokens in context${threshold ? ` · compacts automatically at ${threshold.toLocaleString()}` : " · auto-compact is off"}. Click to compact now.`}
+      onClick={() => compactConversation(convId)}
+    >
+      {threshold && (
+        <span className="ctx-bar">
+          <i style={{ width: `${pct * 100}%` }} />
+        </span>
+      )}
+      {fmtTokens(tokens)}
+      {threshold ? <span className="ctx-of">/ {fmtTokens(threshold)}</span> : " ctx"}
+    </button>
+  );
+}
+
+function ChatMenu({ onCompact, onRename, onExport, onDelete }: { onCompact: () => void; onRename: () => void; onExport: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -269,6 +297,7 @@ function ChatMenu({ onRename, onExport, onDelete }: { onRename: () => void; onEx
       </button>
       {open && (
         <div className="menu menu-compact">
+          {item("Compact conversation", "compress", onCompact)}
           {item("Rename", "pencil", onRename)}
           {item("Export as Markdown", "download", onExport)}
           {item("Delete chat", "trash", onDelete, true)}
@@ -368,6 +397,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
 
 type Segment =
   | { kind: "text"; text: string }
+  | { kind: "compact"; block: Extract<Block, { type: "compact" }> }
   | { kind: "thinking"; text: string }
   | { kind: "steps"; tools: Extract<Block, { type: "tool" }>[] };
 
@@ -378,7 +408,8 @@ function segments(blocks: Block[]): Segment[] {
       const prev = out[out.length - 1];
       if (prev?.kind === "steps") prev.tools.push(b);
       else out.push({ kind: "steps", tools: [b] });
-    } else if (b.text.trim()) out.push({ kind: b.type, text: b.text });
+    } else if (b.type === "compact") out.push({ kind: "compact", block: b });
+    else if (b.text.trim()) out.push({ kind: b.type, text: b.text });
   }
   return out;
 }
@@ -420,6 +451,7 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
   const streamingText = live && lastSeg?.kind === "text";
   const model = MODELS.find((m) => m.id === message.model)?.label ?? message.model;
   const text = plainText(message);
+  const onlyCompact = message.blocks.length > 0 && message.blocks.every((b) => b.type === "compact") && !message.error;
   // Assets touched in this turn, newest result per asset.
   const assetIds = [
     ...new Set(
@@ -439,6 +471,8 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
           <Markdown key={i} text={s.text} live={streamingText && i === segs.length - 1} />
         ) : s.kind === "thinking" ? (
           <Thinking key={i} text={s.text} live={live && i === segs.length - 1} />
+        ) : s.kind === "compact" ? (
+          <CompactDivider key={i} block={s.block} />
         ) : (
           <ToolCalls key={i} tools={s.tools} />
         ),
@@ -453,7 +487,7 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
       )}
       {isLast && !live && CLI_OUTDATED.test(`${message.error ?? ""}\n${text}`) && <CliOutdated model={model} error={`${message.error ?? ""}\n${text}`} onRetry={onRetry} />}
       {message.interrupted && <div className="msg-note">Stopped.</div>}
-      {!live && (
+      {!live && !onlyCompact && (
         <div className="msg-meta">
           {model && <span>{model}</span>}
           <time>{timeOf(message.createdAt)}</time>
@@ -530,9 +564,35 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
   );
 }
 
+function CompactDivider({ block }: { block: Extract<Block, { type: "compact" }> }) {
+  const secs = block.startedAt && block.endedAt ? Math.max(1, Math.round((block.endedAt - block.startedAt) / 1000)) : null;
+  return (
+    <div className={`compact-divider ${block.status}`} role="separator">
+      <span className="compact-label">
+        {block.status === "running" ? (
+          <>
+            <span className="spinner" /> Compacting the conversation…
+          </>
+        ) : block.status === "error" ? (
+          <>
+            <Icon name="compress" size={12} /> Not compacted
+          </>
+        ) : (
+          <>
+            <Icon name="compress" size={12} /> {block.trigger === "auto" ? "Auto-compacted" : "Compacted"}
+            {block.preTokens !== undefined && block.postTokens !== undefined && ` · ${fmtTokens(block.preTokens)} → ${fmtTokens(block.postTokens)} tokens`}
+            {secs && ` · ${secs}s`}
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
 function liveLabel(message: ChatMessage): string {
   const running = [...message.blocks].reverse().find((b): b is Extract<Block, { type: "tool" }> => b.type === "tool" && b.status === "running");
   const last = message.blocks[message.blocks.length - 1];
+  if (last?.type === "compact" && last.status === "running") return "Compacting the conversation";
   if (!running) return !last ? "Starting" : last.type === "text" ? "Writing" : "Thinking";
   const n = running.name.replace(/^mcp__forge__/, "");
   if (running.inputPartial !== undefined) return n === "create_model" || n === "edit_model" ? "Designing the model" : /ui/.test(n) ? "Designing the UI" : "Preparing the next step";

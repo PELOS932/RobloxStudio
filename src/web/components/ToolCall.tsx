@@ -339,7 +339,7 @@ export function approxTokens(blocks: Block[]): number {
   let chars = 0;
   for (const b of blocks) {
     if (b.type === "tool") chars += b.inputChars ?? JSON.stringify(b.input ?? {}).length;
-    else chars += b.text.length;
+    else if (b.type !== "compact") chars += b.text.length;
   }
   return Math.round(chars / 3.8);
 }

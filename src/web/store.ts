@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api, socket } from "./lib/api.ts";
 import type {
-  Asset, AssetSummary, ChatMessage, ClaudeStatus, Conversation, ConversationMeta, ConvStatus, Game,
+  Asset, AssetSummary, ChatMessage, ClaudeStatus, ContextState, Conversation, ConversationMeta, ConvStatus, Game,
   HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
@@ -25,6 +25,8 @@ interface State {
   queues: Record<string, QueuedMessage[]>;
   /** Claude subscription usage (live while Claude works). */
   limits: PlanUsage | null;
+  /** Auto-compact state per conversation, as Claude Code reported it. */
+  contexts: Record<string, ContextState>;
   /** Progress of a running map transfer from Studio (Place tab). */
   placeProgress: string | null;
   /** `claude update` is running. */
@@ -69,6 +71,7 @@ export const useStore = create<State>(() => ({
   running: {},
   queues: {},
   limits: null,
+  contexts: {},
   placeProgress: null,
   claudeUpdating: false,
   games: [],
@@ -128,6 +131,7 @@ function onEvent(e: ServerEvent) {
         running: s.running,
         queues: s.queues ?? {},
         limits: s.limits ?? null,
+        contexts: s.contexts ?? {},
         permissions: s.permissions,
         games: s.games ?? [],
         currentGameId: s.currentGameId,
@@ -180,6 +184,9 @@ function onEvent(e: ServerEvent) {
       break;
     case "limits":
       set({ limits: e.limits });
+      break;
+    case "context":
+      set((s) => ({ contexts: { ...s.contexts, [e.convId]: e.state } }));
       break;
     case "games":
       set({ games: e.games, currentGameId: e.currentGameId });
@@ -310,6 +317,11 @@ export async function sendMessage(text: string, images?: { mediaType: string; da
 
 export function stopConversation(id: string) {
   socket.send({ type: "chat.stop", convId: id });
+}
+
+/** Summarize the conversation so far now (after the current reply, if one is running). */
+export function compactConversation(id: string, instructions?: string) {
+  socket.send({ type: "chat.compact", convId: id, instructions });
 }
 
 /** Drop a follow-up that hasn't started yet. */

@@ -5,6 +5,7 @@ import { toast, updateClaudeCode, updateSettings, useStore } from "../store.ts";
 import { MODELS } from "./Chat.tsx";
 import { PlanUsageCard } from "./PlanUsage.tsx";
 import type { Settings } from "../../shared/protocol.ts";
+import { COMPACT_MAX, COMPACT_MIN, COMPACT_PRESETS, clampCompact, compactPlan, type AutoCompact } from "../../shared/context.ts";
 
 type Section = "general" | "account" | "studio" | "import" | "advanced";
 
@@ -97,6 +98,7 @@ function General({ s }: { s: Settings }) {
           </button>
         </div>
       </div>
+      <AutoCompactField value={s.autoCompact} />
       <Toggle on={s.autoImport} onChange={(v) => void updateSettings({ autoImport: v })} title="Auto-import into Studio">
         When Studio is connected, every model/UI/script Claude creates or edits is pushed into the place immediately.
       </Toggle>
@@ -107,6 +109,58 @@ function General({ s }: { s: Settings }) {
         Keeps the conversation cached while you test in Studio, so coming back after a break doesn't re-send the whole context.
       </Toggle>
     </>
+  );
+}
+
+const k = (n: number) => (n >= 1_000_000 ? `${n / 1_000_000}M` : `${Math.round(n / 1000)}k`);
+
+function AutoCompactField({ value }: { value: AutoCompact }) {
+  const [custom, setCustom] = useState(typeof value === "number" && !COMPACT_PRESETS.includes(value) ? String(value / 1000) : "");
+  const set = (v: AutoCompact) => {
+    // The reported thresholds belong to the old setting until Claude Code restarts.
+    useStore.setState({ contexts: {} });
+    void updateSettings({ autoCompact: v });
+  };
+  const applyCustom = () => {
+    const n = Number(custom);
+    if (!custom.trim() || !Number.isFinite(n) || n <= 0) return;
+    const t = clampCompact(n * 1000);
+    setCustom(String(t / 1000));
+    set(t);
+  };
+  const options: [AutoCompact, string][] = [["off", "Off"], ...COMPACT_PRESETS.map((n): [AutoCompact, string] => [n, k(n)]), ["auto", "Claude default"]];
+  return (
+    <div className="field">
+      <label>Auto-compact</label>
+      <div className="seg seg-wrap" role="group" aria-label="Auto-compact">
+        {options.map(([v, label]) => (
+          <button key={String(v)} className={value === v ? "active" : ""} onClick={() => (setCustom(""), set(v))}>
+            {label}
+          </button>
+        ))}
+        <span className="seg-custom">
+          <input
+            className="input"
+            inputMode="numeric"
+            placeholder="Custom"
+            aria-label="Custom threshold in thousands of tokens"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value.replace(/[^0-9.]/g, ""))}
+            onBlur={applyCustom}
+            onKeyDown={(e) => e.key === "Enter" && applyCustom()}
+          />
+          k
+        </span>
+      </div>
+      <span className="hint">
+        {value === "off"
+          ? "Never compacts on its own: replies re-read the whole conversation until it hits the model's limit. "
+          : value === "auto"
+            ? "Claude Code's default: about 784k tokens on 1M-token models (Opus, Sonnet), 144k on Haiku. "
+            : `Summarizes the conversation when it reaches about ${compactPlan(value).threshold.toLocaleString()} tokens. `}
+        Smaller keeps replies faster and lighter on your plan; larger keeps more detail. Range {k(COMPACT_MIN)}–{k(COMPACT_MAX)}. Type <span className="kbd">/compact</span> in a chat, or click its token meter, to compact any time.
+      </span>
+    </div>
   );
 }
 

@@ -15,6 +15,7 @@ import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
 import { AnimationSpecSchema, sanitizeAnimationSpec } from "../shared/animation.ts";
+import { parseAutoCompact } from "../shared/context.ts";
 import type { Asset } from "../shared/assets.ts";
 import type { BootState, ClientEvent, ServerEvent, Settings, StudioStatus } from "../shared/protocol.ts";
 
@@ -88,6 +89,7 @@ function bootState(): BootState {
     running: claude.running(),
     queues: claude.queues(),
     limits: claude.limits,
+    contexts: claude.contexts(),
     permissions: forge.pendingPermissions,
     games: games.list(),
     currentGameId: games.currentId,
@@ -344,6 +346,11 @@ api.post("/claude/logout", wrap(async (_req, res) => res.json(await claude.logou
 // Settings ------------------------------------------------------------------
 api.put("/settings", wrap(async (req, res) => {
   const next = req.body as Partial<Settings>;
+  if (next.autoCompact !== undefined) {
+    const ac = parseAutoCompact(next.autoCompact);
+    if (ac === undefined) return void res.status(400).json({ error: "autoCompact must be \"auto\", \"off\" or a token count" });
+    next.autoCompact = ac;
+  }
   const studioChanged = JSON.stringify(next.studio ?? settings.studio) !== JSON.stringify(settings.studio);
   settings = {
     ...settings,
@@ -405,6 +412,7 @@ wss.on("connection", (ws) => {
       } else if (msg.type === "convert.result") htmlBridge.settle(msg.id, msg);
       else if (msg.type === "chat.send") claude.send(msg.convId, msg.text, msg.images);
       else if (msg.type === "chat.stop") claude.stop(msg.convId);
+      else if (msg.type === "chat.compact") claude.compact(msg.convId, msg.instructions);
       else if (msg.type === "chat.unqueue") claude.unqueue(msg.convId, msg.id);
       else if (msg.type === "permission.respond") forge.resolvePermission(msg.id, msg.allow, msg.always);
     } catch (err) {

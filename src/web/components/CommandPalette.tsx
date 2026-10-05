@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  exportConversation, importAsset, openAsset, openConversation, startNewChat, stopConversation, toast, updateSettings, useStore,
+  compactConversation, exportConversation, importAsset, openAsset, openConversation, startNewChat, stopConversation, toast, updateSettings, useStore,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
 import { openScene } from "../lib/place.ts";
@@ -106,6 +106,7 @@ function Palette() {
     }
     act("tab-studio", "Show the Studio panel", "plug", () => useStore.setState({ rightTab: "studio", mobileView: "panel" }), undefined, "luau console");
     if (activeConvId) act("export-chat", "Export this chat as Markdown", "download", () => void exportConversation(activeConvId), undefined, "save transcript");
+    if (activeConvId) act("compact-chat", "Compact this chat", "compress", () => compactConversation(activeConvId), "/compact", "summarize context tokens shrink");
     act("sidebar", sidebarOpen ? "Hide the sidebar" : "Show the sidebar", "sidebar", () => useStore.setState({ sidebarOpen: !sidebarOpen }), undefined, "toggle");
     if (settings) {
       for (const m of MODELS) {

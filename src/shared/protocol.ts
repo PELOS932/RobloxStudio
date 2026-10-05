@@ -1,6 +1,7 @@
 // Types shared by the local server and the web UI.
 
 import type { Asset, AssetSummary } from "./assets.ts";
+import type { AutoCompact } from "./context.ts";
 
 export type Effort = "default" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ToolMode = "studio" | "full";
@@ -24,6 +25,8 @@ export interface Settings {
   autoImport: boolean;
   /** Ask Claude Code for 1-hour prompt caching (ENABLE_PROMPT_CACHING_1H). */
   longCache: boolean;
+  /** When Claude Code compacts the conversation: "auto", "off" or about this many tokens. */
+  autoCompact: AutoCompact;
   claudePath: string;
   workspaceDir: string;
   studio: { command: string; args: string[]; autoConnect: boolean };
@@ -49,6 +52,16 @@ export type ToolStatus = "running" | "done" | "error" | "denied";
 
 export type Block =
   | { type: "text"; text: string }
+  | {
+      /** Claude Code summarized the conversation so far (automatically or on request). */
+      type: "compact";
+      trigger: "auto" | "manual";
+      status: "running" | "done" | "error";
+      preTokens?: number;
+      postTokens?: number;
+      startedAt?: number;
+      endedAt?: number;
+    }
   | { type: "thinking"; text: string }
   | {
       type: "tool";
@@ -78,6 +91,16 @@ export interface ChatMessage {
   usage?: TurnUsage;
   error?: string;
   interrupted?: boolean;
+}
+
+/** Claude Code's auto-compact state for a running conversation. */
+export interface ContextState {
+  enabled: boolean;
+  /** Context size (tokens) at which it compacts. */
+  threshold: number;
+  /** Usable context window after the reply reserve. */
+  window: number;
+  compacting?: boolean;
 }
 
 export interface ConversationMeta {
@@ -163,6 +186,8 @@ export interface BootState {
   permissions: PermissionRequest[];
   /** Latest subscription usage (null until Claude Code has reported it). */
   limits: PlanUsage | null;
+  /** Auto-compact state of conversations with a running Claude Code. */
+  contexts: Record<string, ContextState>;
   games: Game[];
   /** The game open in Studio right now, if any. */
   currentGameId?: string;
@@ -190,6 +215,7 @@ export type ServerEvent =
   | { type: "status"; convId: string; status: ConvStatus; error?: string }
   | { type: "queue"; convId: string; items: QueuedMessage[] }
   | { type: "limits"; limits: PlanUsage }
+  | { type: "context"; convId: string; state: ContextState }
   | { type: "place.progress"; text: string | null }
   | { type: "games"; games: Game[]; currentGameId?: string }
   | { type: "asset"; asset: AssetSummary; focus?: boolean }
@@ -214,6 +240,7 @@ export interface HtmlConvertRequest {
 export type ClientEvent =
   | { type: "chat.send"; convId: string; text: string; images?: { mediaType: string; data: string }[] }
   | { type: "chat.stop"; convId: string }
+  | { type: "chat.compact"; convId: string; instructions?: string }
   | { type: "chat.unqueue"; convId: string; id: string }
   | { type: "permission.respond"; id: string; allow: boolean; always?: boolean }
   | { type: "convert.result"; id: string; spec?: unknown; warnings?: string[]; error?: string }
@@ -229,4 +256,4 @@ export interface ImportResult {
   optimizedFrom?: number;
 }
 
-export type { Asset, AssetSummary };
+export type { Asset, AssetSummary, AutoCompact };

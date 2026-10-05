@@ -249,6 +249,36 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(userTexts).toEqual(["run some luau", "second follow-up"]);
   });
 
+  it("compacts at the size picked in Settings, and on request", async () => {
+    expect((await api("/api/settings", { method: "PUT", body: JSON.stringify({ autoCompact: "lots" }) })).status).toBe(400);
+    expect((await api("/api/settings", { method: "PUT", body: JSON.stringify({ autoCompact: 150_000 }) })).body.autoCompact).toBe(150_000);
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "hello there" }));
+    // Claude Code was started with a window and percent that land on the chosen size.
+    const ctx = await waitFor("context", (e) => e.convId === conv.id && e.state.threshold > 0);
+    expect(ctx.state.enabled).toBe(true);
+    expect(Math.abs(ctx.state.threshold - 150_000)).toBeLessThan(500);
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle");
+    expect((await api("/api/state")).body.contexts[conv.id].threshold).toBe(ctx.state.threshold);
+
+    ws.send(JSON.stringify({ type: "chat.compact", convId: conv.id }));
+    await waitFor("context", (e) => e.convId === conv.id && !!e.state.compacting);
+    const done = await waitFor("message", (e) => e.convId === conv.id && e.message.blocks.some((b) => b.type === "compact" && b.status === "done"));
+    expect(done.message.blocks).toEqual([expect.objectContaining({ type: "compact", trigger: "manual", preTokens: 9204, postTokens: 1830 })]);
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && events.indexOf(e) > events.indexOf(done));
+    const full = (await api(`/api/conversations/${conv.id}`)).body;
+    // No "/compact" bubble: just the divider, with the smaller context as the latest size.
+    expect(full.messages.map((m: { role: string }) => m.role)).toEqual(["user", "assistant", "assistant"]);
+    expect(full.messages[2].usage.contextTokens).toBe(1830);
+
+    // "/compact" typed in the composer does the same; "off" restarts Claude Code without auto-compact.
+    expect((await api("/api/settings", { method: "PUT", body: JSON.stringify({ autoCompact: "off" }) })).body.autoCompact).toBe("off");
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "/compact keep the castle details" }));
+    await waitFor("context", (e) => e.convId === conv.id && e.state.enabled === false);
+    await waitFor("message", (e) => e.convId === conv.id && e.message.id !== done.message.id && e.message.blocks.some((b) => b.type === "compact" && b.status === "done"));
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ autoCompact: 200_000 }) });
+  });
+
   it("keeps earlier asset versions and restores one as a new version", async () => {
     const v1 = (await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", spec: { name: "Greeter", kind: "Script", source: "print('v1')" } }) })).body;
     await api("/api/assets", { method: "POST", body: JSON.stringify({ kind: "script", replaceId: v1.id, spec: { name: "Greeter", kind: "Script", source: "print('v2')\nprint('more')" } }) });
