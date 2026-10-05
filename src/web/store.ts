@@ -5,7 +5,7 @@ import type {
   HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
-export type RightTab = "preview" | "assets" | "place" | "studio";
+export type RightTab = "preview" | "assets" | "animate" | "place" | "studio";
 export type MobileView = "chats" | "chat" | "panel";
 
 export interface Toast {
@@ -34,6 +34,8 @@ interface State {
   currentGameId?: string;
   /** Library filter: "open" (the game open in Studio), "all", "none" (unfiled) or a game id. */
   libraryGame: string;
+  /** Animation shown in the Animate tab. */
+  animationId: string | null;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -71,6 +73,7 @@ export const useStore = create<State>(() => ({
   claudeUpdating: false,
   games: [],
   libraryGame: "open",
+  animationId: null,
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -190,9 +193,11 @@ function onEvent(e: ServerEvent) {
         const cached = s.assetCache[e.asset.id];
         // Specs only change with the version; import info lives on the summary.
         const assetCache = cached && cached.version !== e.asset.version ? omit(s.assetCache, e.asset.id) : s.assetCache;
-        return e.focus
-          ? { assets, assetCache, activeAssetId: e.asset.id, rightTab: "preview" as RightTab }
-          : { assets, assetCache };
+        if (!e.focus) return { assets, assetCache };
+        // New or edited animations open in the Animate tab, everything else in the preview.
+        return e.asset.kind === "animation"
+          ? { assets, assetCache, activeAssetId: e.asset.id, animationId: e.asset.id, rightTab: "animate" as RightTab }
+          : { assets, assetCache, activeAssetId: e.asset.id, rightTab: "preview" as RightTab };
       });
       break;
     case "asset.deleted":

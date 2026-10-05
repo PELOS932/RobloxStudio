@@ -11,6 +11,8 @@ import { UiPreview } from "./UiPreview.tsx";
 import { ScriptView } from "./ScriptView.tsx";
 import { StudioPanel } from "./StudioPanel.tsx";
 import { PlacePanel } from "./PlacePanel.tsx";
+import { AnimatePanel } from "./AnimatePanel.tsx";
+import { AnimationViewer } from "./AnimationViewer.tsx";
 import { HtmlSourceView, retranslate } from "./HtmlTools.tsx";
 import { Library, timeAgo } from "./Library.tsx";
 
@@ -22,21 +24,25 @@ export function RightPanel() {
     <section className="panel">
       <div className="tabs">
         <button className={`tab ${tab === "preview" ? "active" : ""}`} onClick={() => setRightTab("preview")}>
-          <Icon name="eye" /> Preview
+          <Icon name="eye" /> <span className="tab-label">Preview</span>
         </button>
         <button className={`tab ${tab === "assets" ? "active" : ""}`} onClick={() => setRightTab("assets")}>
-          <Icon name="grid" /> Library <span className="count">{assets.length}</span>
+          <Icon name="grid" /> <span className="tab-label">Library</span> <span className="count">{assets.length}</span>
+        </button>
+        <button className={`tab ${tab === "animate" ? "active" : ""}`} onClick={() => setRightTab("animate")} title="Animations on R15 or R6 rigs, played live">
+          <Icon name="anim" /> <span className="tab-label">Animate</span>
         </button>
         <button className={`tab ${tab === "place" ? "active" : ""}`} onClick={() => setRightTab("place")} title="Browse the open Studio place: Explorer, map, UIs and scripts">
-          <Icon name="map" /> Place
+          <Icon name="map" /> <span className="tab-label">Place</span>
         </button>
         <button className={`tab ${tab === "studio" ? "active" : ""}`} onClick={() => setRightTab("studio")}>
-          <Icon name="plug" /> Studio <span className={`dot ${studio.state === "connected" ? (studio.studioId ? "ok" : "warn") : studio.state === "connecting" ? "busy" : studio.state === "error" ? "err" : ""}`} />
+          <Icon name="plug" /> <span className="tab-label">Studio</span> <span className={`dot ${studio.state === "connected" ? (studio.studioId ? "ok" : "warn") : studio.state === "connecting" ? "busy" : studio.state === "error" ? "err" : ""}`} />
         </button>
       </div>
       <div className="panel-body">
         {tab === "preview" && <PreviewPane />}
         {tab === "assets" && <Library />}
+        {tab === "animate" && <AnimatePanel />}
         {tab === "place" && <PlacePanel />}
         {tab === "studio" && <StudioPanel />}
       </div>
@@ -101,6 +107,7 @@ function PreviewPane() {
         {asset?.kind === "model" && <ModelViewer spec={asset.spec} onReference={reference} />}
         {asset?.kind === "ui" && (htmlAsset && view === "html" ? <HtmlSourceView asset={htmlAsset} /> : <UiPreview spec={asset.spec} onReference={reference} />)}
         {asset?.kind === "script" && <ScriptView source={asset.spec.source} />}
+        {asset?.kind === "animation" && <AnimationViewer spec={asset.spec} />}
       </div>
     </>
   );

@@ -20,6 +20,7 @@ import {
 import { ScriptSpecSchema } from "../shared/script.ts";
 import { checkModel, describeIssues } from "../shared/diagnostics.ts";
 import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from "../shared/compact.ts";
+import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
 import { sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
@@ -196,7 +197,8 @@ export class ForgeMcp {
   // -------------------------------------------------------------------------
 
   private async afterSave(asset: Asset, verb: string, ctx: Ctx, warnings: string[] = []): Promise<ToolResult> {
-    const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${dims(asset)}). Shown in the preview.`];
+    const extra = asset.kind === "animation" ? `, ${asset.spec.rig}, ${Math.round(animationLength(asset.spec) * 100) / 100}s` : dims(asset);
+    const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${extra}). Shown in the preview.`];
     if (warnings.length) lines.push(`Notes: ${warnings.slice(0, 8).join("; ")}`);
     // Positioning problems Claude can fix before the user notices (floating parts, flicker…).
     if (asset.kind === "model") lines.push(...describeIssues(checkModel(asset.spec)));
@@ -213,7 +215,7 @@ export class ForgeMcp {
     const prev = replaceId ? assets.get(replaceId) : undefined;
     if (replaceId && (!prev || prev.kind !== kind)) throw new Error(`No ${kind} asset with id ${replaceId}.`);
     const asset = {
-      id: prev?.id ?? shortId(kind === "model" ? "m_" : kind === "ui" ? "u_" : "s_"),
+      id: prev?.id ?? shortId(kind === "model" ? "m_" : kind === "ui" ? "u_" : kind === "animation" ? "a_" : "s_"),
       kind,
       name: spec.name,
       description: (spec as { description?: string }).description,
@@ -355,6 +357,34 @@ export class ForgeMcp {
           const { spec, warnings } = await this.deps.convertHtml({ name: prev.spec.name, html: source, width: html.width, height: html.height, autoScale: html.autoScale });
           const asset = this.save("ui", spec, assetId, html);
           return this.afterSave(asset, "Edited (from HTML)", ctx, warnings);
+        },
+      },
+      {
+        name: "create_animation",
+        description:
+          "Create (or replace, with id) a character animation for an R15 or R6 rig. It plays live in the preview; importing saves a KeyframeSequence the Animation Editor can load onto a dummy rig.",
+        schema: AnimationSpecSchema.extend({ id: id.optional().describe("replace this existing animation") }),
+        advertise: (s) => looseItems(s, {
+          keyframes: "[{t: seconds, poses: {joint: [x,y,z] degrees | {rot, pos}}, ease?: linear|constant|cubic|elastic|bounce, dir?: in|out|inOut, name?}] — joints: root waist neck left/right Shoulder Elbow Wrist Hip Knee Ankle",
+        }),
+        run: async ({ id: replaceId, ...raw }, ctx) => {
+          const spec = sanitizeAnimationSpec(raw);
+          const skipped = unsupportedJoints(spec, RIGS[spec.rig]);
+          const asset = this.save("animation", spec, replaceId);
+          return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx, skipped.length ? [`${spec.rig} has no ${skipped.join(", ")} (ignored there)`] : []);
+        },
+      },
+      {
+        name: "edit_animation",
+        description: "Change an animation: merge keyframes by time (only the joints you list change), remove keyframes or joints, retime with speed, or switch rig/loop/priority.",
+        schema: AnimationEditSchema.extend({ id }),
+        advertise: (s) => looseItems(s, { keyframes: "same format as create_animation keyframes; merged into the keyframe at the same t" }),
+        run: async ({ id: assetId, ...edit }, ctx) => {
+          const prev = assets.get(assetId);
+          if (!prev || prev.kind !== "animation") return text(`No animation with id ${assetId}.`, true);
+          const { spec, missing } = applyAnimationEdit(prev.spec, edit);
+          const asset = this.save("animation", spec, assetId);
+          return this.afterSave(asset, "Edited", ctx, missing.length ? [`no keyframe at ${missing.join(", ")}s`] : []);
         },
       },
       {

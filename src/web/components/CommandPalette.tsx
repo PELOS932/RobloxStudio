@@ -17,7 +17,7 @@ interface Item {
   /** Extra words that should match (not shown). */
   keywords?: string;
   icon?: IconName;
-  kind?: "model" | "ui" | "script";
+  kind?: "model" | "ui" | "script" | "animation";
   run: () => void;
 }
 
@@ -96,6 +96,7 @@ function Palette() {
     for (const g of games) {
       act(`game-${g.id}`, `Library: ${g.name}`, "map", () => useStore.setState({ rightTab: "assets", mobileView: "panel", libraryGame: g.id }), undefined, "game place assets models");
     }
+    act("tab-animate", "Open animations", "anim", () => useStore.setState({ rightTab: "animate", mobileView: "panel" }), undefined, "animate r6 r15 rig keyframes dance walk");
     act("tab-place", "Browse the Studio place", "map", () => useStore.setState({ rightTab: "place", mobileView: "panel" }), undefined, "explorer workspace tree scripts gui");
     if (studioReady) {
       act("place-map", "View the whole map in 3D", "map", () => {

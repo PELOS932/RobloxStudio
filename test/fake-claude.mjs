@@ -148,6 +148,19 @@ for await (const line of createInterface({ input: process.stdin })) {
     streamText(example[0] === "create_model"
       ? "Done — **Cozy Cabin** is in the preview (76 parts). Click any part to ask for changes, or hit *Import to Studio*."
       : "The **ItemShop** UI is ready. It scales with the screen, so check the Phone and Desktop presets.");
+  } else if (/dance/i.test(prompt)) {
+    streamText("Making a little R15 dance.");
+    const res = await toolCall("create_animation", {
+      name: "Dance", rig: "R15", loop: true,
+      keyframes: [
+        { t: 0, ease: "cubic", poses: { rightShoulder: [0, 0, 150], leftShoulder: [0, 0, -150], root: { pos: [0, 0, 0] } } },
+        { t: 0.5, ease: "cubic", poses: { rightShoulder: [0, 0, 100], leftShoulder: [0, 0, -100], root: { pos: [0, 0.4, 0] }, rightKnee: [-40, 0, 0] } },
+        { t: 1, poses: { rightShoulder: [0, 0, 150], leftShoulder: [0, 0, -150], root: { pos: [0, 0, 0] } } },
+      ],
+    });
+    const animId = res.content[0].text.match(/\b(a_[a-z0-9]{6})\b/)?.[1];
+    await toolCall("edit_animation", { id: animId, speed: 2, keyframes: [{ t: 0.5, poses: { neck: [0, 20, 0] } }] });
+    streamText("Done.");
   } else if (/lantern/i.test(prompt)) {
     streamText("Building a lantern.");
     await toolCall("create_model", lantern);

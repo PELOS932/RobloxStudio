@@ -1987,6 +1987,225 @@ button.ctx-chip:hover {
   flex: none;
 }
 
+/* Animate tab + animation viewer */
+.anim {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.anim-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.anim-search {
+  min-width: 80px;
+  height: 28px;
+}
+.anim-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.anim-list {
+  width: 230px;
+  flex: none;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  border-right: 1px solid var(--border);
+}
+.anim-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.anim-item:hover {
+  background: var(--elev);
+}
+.anim-item.active {
+  background: var(--select-soft);
+  border-color: var(--select-ring);
+}
+.anim-item-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.anim-item-meta b {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.anim-item-meta small {
+  font: 11px var(--mono);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.anim-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.anim-viewer {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  background: radial-gradient(ellipse at 50% 35%, #17181c 0%, #0d0d0f 70%);
+}
+.anim-canvas {
+  position: absolute;
+  inset: 0;
+}
+.anim-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.anim-rigs {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: var(--panel);
+}
+.anim-note {
+  position: absolute;
+  top: 14px;
+  left: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-faint);
+  font: 11px var(--mono);
+}
+.anim-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: rgba(17, 17, 19, 0.92);
+}
+.anim-play {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent) !important;
+  color: var(--accent-ink) !important;
+}
+.anim-track {
+  position: relative;
+  flex: 1;
+  min-width: 60px;
+  height: 22px;
+  cursor: pointer;
+  touch-action: none;
+}
+.anim-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--elev-2);
+}
+.anim-fill {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-dim);
+  pointer-events: none;
+}
+.anim-key {
+  position: absolute;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  transform: rotate(45deg);
+  background: var(--text-faint);
+  pointer-events: none;
+}
+.anim-cursor {
+  position: absolute;
+  top: 4px;
+  width: 2px;
+  height: 15px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--select);
+  pointer-events: none;
+}
+.anim-time {
+  font: 11.5px var(--mono);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.anim-speed {
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: 11.5px var(--mono);
+}
+@container panel (max-width: 620px) {
+  .anim.has-view .anim-list {
+    display: none;
+  }
+  .anim .place-back {
+    display: inline-grid;
+  }
+  .anim-head .long,
+  .anim .place-view-head .long {
+    display: none;
+  }
+  .anim-time {
+    display: none;
+  }
+}
+@container panel (max-width: 480px) {
+  .tab .tab-label {
+    display: none;
+  }
+  .tab.active .tab-label {
+    display: inline;
+  }
+  .tab {
+    padding: 0 8px;
+  }
+}
+
 /* Place tab: Studio's Explorer + a view of the selected instance */
 .place {
   flex: 1;

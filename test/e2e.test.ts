@@ -167,6 +167,29 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect((await api("/api/state")).body.assets.find((a: { id: string }) => a.id === saved.id).thumb).toBe(saved.version);
   });
 
+  it("makes an animation, edits it and saves it in Studio for the Animation Editor", async () => {
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "Make me a dance" }));
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && events.some((x) => x.type === "asset" && x.asset.kind === "animation" && x.asset.version === 2));
+    const anim = (await api("/api/state")).body.assets.find((a: { kind: string }) => a.kind === "animation");
+    expect(anim).toMatchObject({ name: "Dance", version: 2, detail: "R15 · 0.5s · loop" });
+    const full = (await api(`/api/assets/${anim.id}`)).body;
+    expect(full.spec.keyframes.map((k: { t: number }) => k.t)).toEqual([0, 0.25, 0.5]); // twice as fast
+    expect(full.spec.keyframes[1].poses).toMatchObject({ neck: [0, 20, 0], rightKnee: [-40, 0, 0] });
+    const last = (await api(`/api/conversations/${conv.id}`)).body.messages.at(-1);
+    const results = last.blocks.filter((b: { type: string }) => b.type === "tool").map((b: { result?: { text: string } }) => b.result?.text ?? "");
+    expect(results[0]).toMatch(/Created animation "Dance".*R15, 1s/);
+    expect(results.join("\n")).toMatch(/Imported in Studio at ServerStorage\.RBX_ANIMSAVES\.Forge R15 Dummy\.Dance/);
+    // The dummy rig and its KeyframeSequence are really in the (mock) place.
+    const check = (await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: 'local s = game:GetService("ServerStorage").RBX_ANIMSAVES["Forge R15 Dummy"].Dance return #s:GetChildren() .. " " .. workspace["Forge R15 Dummy"].Humanoid.RigType.Name' }) })).body;
+    expect(check).toMatchObject({ ok: true, output: "3 R15" });
+
+    const starters = (await api("/api/animations/starters", { method: "POST" })).body;
+    expect(starters.ids).toHaveLength(5);
+    const rbxmx = await (await fetch(`${BASE}/api/assets/${starters.ids[0]}/export?format=rbxmx`)).text();
+    expect(rbxmx).toContain('<Item class="KeyframeSequence"');
+  });
+
   it("browses the open place: Explorer, map, scripts and selection", async () => {
     const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
     const top = (await post("/api/place/children", { path: [] })).body;

@@ -93,6 +93,14 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
     case "create_ui_html": return { label: "Create UI from HTML", args: [field("name"), input.width ? `${input.width}×${input.height ?? 720}` : ""].filter(Boolean).join(" · ") };
     case "edit_ui_html": return { label: "Edit UI HTML", args: [asset(field("id")), count(input.edits) ? plural(count(input.edits), "edit") : ""].filter(Boolean).join(" · ") };
     case "create_script": return { label: "Create script", args: [field("name"), input.kind].filter(Boolean).join(" · ") };
+    case "create_animation": return { label: "Create animation", args: [field("name"), input.rig, count(input.keyframes) ? plural(count(input.keyframes), "keyframe") : ""].filter(Boolean).join(" · ") };
+    case "edit_animation": {
+      const bits = [asset(field("id"))];
+      if (count(input.keyframes)) bits.push(`~${plural(count(input.keyframes), "keyframe")}`);
+      if (count(input.remove)) bits.push(`−${count(input.remove)}`);
+      if (input.speed) bits.push(`×${input.speed}`);
+      return { label: "Edit animation", args: bits.filter(Boolean).join(" ") };
+    }
     case "list_assets": return { label: "List assets", args: "" };
     case "get_asset": return { label: "Read asset", args: asset(field("id")) };
     case "import_to_studio": return { label: "Import to Studio", args: [asset(field("id")), input.parent].filter(Boolean).join(" → ") };

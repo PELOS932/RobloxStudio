@@ -16,6 +16,8 @@ import {
   type UiSpec, type UiTreeNode,
 } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
+import { jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue } from "./animation.ts";
+import { eulerXYZDeg } from "./math.ts";
 import type { ImportOptions } from "./to-luau.ts";
 
 type Prop = string;
@@ -346,5 +348,52 @@ function writeUiNode(w: Writer, t: UiTreeNode) {
 export function scriptToRbxmx(spec: ScriptSpec, opts: ImportOptions = {}): string {
   const w = new Writer();
   w.leaf(spec.kind, [str("Name", spec.name), protectedString("Source", spec.source), ...forgeAttrs(opts)]);
+  return w.toString();
+}
+
+// Enum values (rbx-dom): PoseEasingStyle, PoseEasingDirection (In/Out swapped: Roblox poses use them
+// backwards from TweenService), AnimationPriority.
+const POSE_STYLE_TOKEN = { linear: 0, constant: 1, elastic: 2, bounce: 4, cubic: 5 } as const;
+const POSE_DIR_TOKEN = { in: 1, out: 0, inOut: 2 } as const;
+const PRIORITY_TOKEN = { Idle: 0, Movement: 1, Action: 2, Core: 1000 } as const;
+
+/** A KeyframeSequence: drop it into Studio, then right-click → Save to Roblox to get an animation id. */
+export function animationToRbxmx(spec: AnimationSpec, opts: ImportOptions = {}): string {
+  const rig = RIGS[spec.rig];
+  const joints = new Map(rig.joints.map((j) => [j.joint, j]));
+  const children = new Map<string, string[]>();
+  for (const j of rig.joints) children.set(j.part0, [...(children.get(j.part0) ?? []), j.part1]);
+  const w = new Writer();
+  w.open("KeyframeSequence", [
+    str("Name", spec.name), bool("Loop", spec.loop ?? true), token("Priority", PRIORITY_TOKEN[spec.priority ?? "Action"]), ...forgeAttrs(opts),
+  ]);
+  for (const k of spec.keyframes) {
+    w.open("Keyframe", [str("Name", k.name ?? "Keyframe"), float("Time", k.t)]);
+    const posed = new Map<string, { pos: number[]; rot: number[] }>();
+    for (const [name, value] of Object.entries(k.poses) as [Joint, PoseValue][]) {
+      const j = joints.get(name);
+      if (!j || !value) continue;
+      const p = poseOf(value);
+      posed.set(j.part1, jointTransform(j, { rot: eulerXYZDeg(p.rot), pos: p.pos }));
+    }
+    // Only branches that lead to a posed part; the rest of the hierarchy is left out.
+    const needed = (part: string): boolean => posed.has(part) || (children.get(part) ?? []).some(needed);
+    const visit = (part: string) => {
+      const t = posed.get(part);
+      // Container poses (Weight 0) only hold the hierarchy; everything else on them is default.
+      w.open("Pose", t ? [
+        str("Name", part),
+        `<CoordinateFrame name="CFrame">${cframeBody(t.pos, t.rot)}</CoordinateFrame>`,
+        float("Weight", 1),
+        token("EasingStyle", POSE_STYLE_TOKEN[k.ease ?? "linear"]),
+        token("EasingDirection", POSE_DIR_TOKEN[k.dir ?? "inOut"]),
+      ] : [str("Name", part), float("Weight", 0)]);
+      for (const c of children.get(part) ?? []) if (needed(c)) visit(c);
+      w.close();
+    };
+    if (needed(rig.parts[0].name)) visit(rig.parts[0].name);
+    w.close();
+  }
+  w.close();
   return w.toString();
 }

@@ -6,13 +6,14 @@
 import { luaLongString, luaNum, luaString } from "./luau.ts";
 import { toNativeModel, type ModelSpec, type NativePart } from "./model.ts";
 import { optimizeParts, type OptimizeStats } from "./optimize.ts";
-import { hexToRgb } from "./math.ts";
+import { eulerXYZDeg, hexToRgb } from "./math.ts";
 import { FONTS, FONT_WEIGHT_NAMES, fontFamilyUrl } from "./roblox-data.ts";
 import {
   AUTO_SCALE_ROOT, autoScaleSource, buildUiTree, cornerOf, gradientStops, paddingOf, resolveUiNode,
   type UiSpec, type UiTreeNode,
 } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
+import { animationLength, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue, type Rig } from "./animation.ts";
 
 export interface ImportOptions {
   assetId?: string;
@@ -531,6 +532,201 @@ local ok, result = pcall(function()
 		pcall(function() game:GetService("Selection"):Set({ script }) end)
 	end
 	return { ok = true, kind = "script", path = script:GetFullName(), lines = #string.split(SOURCE, "\\n"), replaced = previous ~= nil }
+end)
+return forgeFinish(ok, result)
+`;
+  return { code };
+}
+
+// ---------------------------------------------------------------------------
+// Animations: a KeyframeSequence saved where Studio's Animation Editor finds it
+// (ServerStorage.RBX_ANIMSAVES.<rig>), plus a dummy rig in Workspace to load it onto.
+
+/** Pose easing names in Roblox order, and In/Out swapped: Roblox poses use them backwards from TweenService. */
+const POSE_STYLES = { linear: "Linear", constant: "Constant", cubic: "CubicV2", elastic: "Elastic", bounce: "Bounce" } as const;
+const POSE_DIRS = { in: "Out", out: "In", inOut: "InOut" } as const;
+
+export function rigLuauTables(rig: Rig): string {
+  const center = new Map(rig.parts.map((p) => [p.name, p.center]));
+  const parts = rig.parts.map((p) => {
+    const [r, g, b] = hexToRgb(p.color);
+    return `{ ${luaString(p.name)}, ${p.size.map((v) => luaNum(v)).join(", ")}, ${p.center.map((v) => luaNum(v)).join(", ")}, ${r}, ${g}, ${b}, ${!!p.hidden} }`;
+  });
+  const cf = (pos: number[], q: number[]) => [...pos, ...q].map((v) => luaNum(v)).join(", ");
+  const motors = rig.joints.map((j) => {
+    const c0 = center.get(j.part0)!, c1 = center.get(j.part1)!;
+    // R15 keeps each Motor6D in its Part1; R6 keeps them in the Torso (RootJoint in the root part).
+    const holder = rig.type === "R15" ? j.part1 : j.part0;
+    return `{ ${luaString(j.motor)}, ${luaString(j.part0)}, ${luaString(j.part1)}, ${luaString(holder)}, CFrame.new(${cf(j.pivot.map((v, i) => v - c0[i]), j.q)}), CFrame.new(${cf(j.pivot.map((v, i) => v - c1[i]), j.q)}) }`;
+  });
+  return `local RIG_PARTS = {\n\t${parts.join(",\n\t")},\n}\nlocal RIG_MOTORS = {\n\t${motors.join(",\n\t")},\n}`;
+}
+
+export function animationToLuau(spec: AnimationSpec, opts: ImportOptions = {}): LuauResult {
+  const rig = RIGS[spec.rig];
+  const joints = new Map(rig.joints.map((j) => [j.joint, j]));
+  const parentOf = rig.joints.map((j) => `[${luaString(j.part1)}] = ${luaString(j.part0)}`);
+  const styleNames = Object.values(POSE_STYLES);
+  const dirNames = Object.values(POSE_DIRS);
+  const keyframes = spec.keyframes.map((k) => {
+    const poses: string[] = [];
+    for (const [name, value] of Object.entries(k.poses) as [Joint, PoseValue][]) {
+      const j = joints.get(name);
+      if (!j || !value) continue;
+      const p = poseOf(value);
+      const t = jointTransform(j, { rot: eulerXYZDeg(p.rot), pos: p.pos });
+      poses.push(`{ ${luaString(j.part1)}, ${[...t.pos, ...t.rot].map((v) => luaNum(v)).join(", ")} }`);
+    }
+    const style = styleNames.indexOf(POSE_STYLES[k.ease ?? "linear"]) + 1;
+    const dir = dirNames.indexOf(POSE_DIRS[k.dir ?? "inOut"]) + 1;
+    return `{ ${luaNum(k.t)}, ${luaString(k.name ?? "Keyframe")}, ${style}, ${dir}, { ${poses.join(", ")} } }`;
+  });
+  const length = animationLength(spec);
+  const code = `${header("animation", spec.name, ` · ${spec.rig} · ${spec.keyframes.length} keyframes · ${luaNum(length, 2)}s`, opts, `Forge: import ${spec.name}`)}
+local RIG_TYPE = ${luaString(spec.rig)}
+local REPLACE = ${opts.replace ?? true}
+local SELECT = ${opts.select ?? true}
+local HIP_HEIGHT = ${rig.type === "R15" ? luaNum(rig.parts[0].center[1] - rig.parts[0].size[1] / 2) : 0}
+${RUNTIME}
+${rigLuauTables(rig)}
+local POSE_PARENT = { ${parentOf.join(", ")} }
+local STYLES = { ${styleNames.map(luaString).join(", ")} }
+local DIRS = { ${dirNames.map(luaString).join(", ")} }
+local KEYFRAMES = {
+	${keyframes.join(",\n\t")},
+}
+
+local function buildDummy(name)
+	local model = Instance.new("Model")
+	model.Name = name
+	local parts = {}
+	for _, p in RIG_PARTS do
+		local part = Instance.new("Part")
+		part.Name = p[1]
+		part.Size = Vector3.new(p[2], p[3], p[4])
+		part.CFrame = CFrame.new(p[5], p[6], p[7])
+		part.Color = Color3.fromRGB(p[8], p[9], p[10])
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		part.CanCollide = false
+		part.Anchored = p[11]
+		if p[11] then part.Transparency = 1 end
+		part.Parent = model
+		parts[p[1]] = part
+	end
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Head
+	mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
+	mesh.Parent = parts.Head
+	local face = Instance.new("Decal")
+	face.Name = "face"
+	face.Texture = "rbxasset://textures/face.png"
+	face.Parent = parts.Head
+	for _, m in RIG_MOTORS do
+		local motor = Instance.new("Motor6D")
+		motor.Name = m[1]
+		motor.Part0 = parts[m[2]]
+		motor.Part1 = parts[m[3]]
+		motor.C0 = m[5]
+		motor.C1 = m[6]
+		motor.Parent = parts[m[4]]
+	end
+	local humanoid = Instance.new("Humanoid")
+	humanoid.RigType = Enum.HumanoidRigType[RIG_TYPE]
+	humanoid.HipHeight = HIP_HEIGHT
+	humanoid.Parent = model
+	Instance.new("Animator").Parent = humanoid
+	model.PrimaryPart = parts.HumanoidRootPart
+	return model
+end
+
+local function setEasing(pose, style, dir)
+	if STYLES[style] == "CubicV2" and not pcall(function() pose.EasingStyle = Enum.PoseEasingStyle.CubicV2 end) then
+		pose.EasingStyle = Enum.PoseEasingStyle.Cubic
+	elseif STYLES[style] ~= "CubicV2" then
+		pose.EasingStyle = Enum.PoseEasingStyle[STYLES[style]]
+	end
+	pose.EasingDirection = Enum.PoseEasingDirection[DIRS[dir]]
+end
+
+local ok, result = pcall(function()
+	local rigName = "Forge " .. RIG_TYPE .. " Dummy"
+	local dummy = workspace:FindFirstChild(rigName)
+	if not dummy then
+		dummy = buildDummy(rigName)
+		-- Stand it on whatever is in front of the camera, facing the camera.
+		pcall(function()
+			local cam = workspace.CurrentCamera.CFrame
+			local ahead = cam.Position + cam.LookVector * 14
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { dummy }
+			local hit = workspace:Raycast(ahead + Vector3.new(0, 500, 0), Vector3.new(0, -2000, 0), params)
+			local x, z = math.round(ahead.X), math.round(ahead.Z)
+			local dx, dz = cam.Position.X - x, cam.Position.Z - z
+			local yaw = math.round(math.atan2(-dx, -dz) / (math.pi / 2)) * (math.pi / 2)
+			local place = CFrame.new(x, if hit then hit.Position.Y else 0, z) * CFrame.Angles(0, yaw, 0)
+			for _, d in dummy:GetDescendants() do
+				if d:IsA("BasePart") then d.CFrame = place * d.CFrame end
+			end
+		end)
+		dummy.Parent = workspace
+	end
+
+	local storage = game:GetService("ServerStorage")
+	local saves = storage:FindFirstChild("RBX_ANIMSAVES")
+	if not saves then
+		saves = Instance.new("Model")
+		saves.Name = "RBX_ANIMSAVES"
+		saves.Parent = storage
+	end
+	local slot = saves:FindFirstChild(rigName)
+	if not slot then
+		slot = Instance.new("ObjectValue")
+		slot.Name = rigName
+		slot.Parent = saves
+	end
+	slot.Value = dummy
+
+	local seq = Instance.new("KeyframeSequence")
+	seq.Name = ${luaString(spec.name)}
+	seq.Loop = ${spec.loop ?? true}
+	seq.Priority = Enum.AnimationPriority.${spec.priority ?? "Action"}
+	for _, k in KEYFRAMES do
+		local keyframe = Instance.new("Keyframe")
+		keyframe.Name = k[2]
+		keyframe.Time = k[1]
+		local poses = {}
+		-- Poses nest like the rig's parts; the ones only holding children have Weight 0 so they don't act as keys.
+		local function poseFor(partName)
+			if poses[partName] then return poses[partName] end
+			local pose = Instance.new("Pose")
+			pose.Name = partName
+			pose.Weight = 0
+			local parentName = POSE_PARENT[partName]
+			pose.Parent = if parentName then poseFor(parentName) else keyframe
+			poses[partName] = pose
+			return pose
+		end
+		for _, p in k[5] do
+			local pose = poseFor(p[1])
+			pose.CFrame = CFrame.new(p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12], p[13])
+			pose.Weight = 1
+			setEasing(pose, k[3], k[4])
+		end
+		keyframe.Parent = seq
+	end
+	local previous = if REPLACE then forgeFindPrevious(slot, FORGE_ASSET_ID) else nil
+	if previous then previous.Parent = nil end
+	if FORGE_ASSET_ID then
+		seq:SetAttribute("ForgeAssetId", FORGE_ASSET_ID)
+		seq:SetAttribute("ForgeVersion", FORGE_VERSION)
+	end
+	seq.Parent = slot
+	if SELECT then
+		pcall(function() game:GetService("Selection"):Set({ dummy }) end)
+	end
+	return { ok = true, kind = "animation", path = seq:GetFullName(), rig = dummy:GetFullName(), keyframes = #KEYFRAMES, replaced = previous ~= nil }
 end)
 return forgeFinish(ok, result)
 `;

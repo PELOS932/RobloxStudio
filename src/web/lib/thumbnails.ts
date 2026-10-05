@@ -5,6 +5,8 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { toNativeModel, type ModelSpec } from "../../shared/model.ts";
 import { materialFor, tileOf } from "./materials.ts";
 import { partGeometry, partMatrix } from "./geometry.ts";
+import { animationLength, buildTracks, poseRig, RIGS, sampleTracks, type AnimationSpec } from "../../shared/animation.ts";
+import { applyPose, buildRig } from "./rig3d.ts";
 
 const W = 288;
 const H = 180;
@@ -174,4 +176,73 @@ export function uploadThumbnail(id: string, version: number, dataUrl: string) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ version, dataUrl }),
   }).catch(() => uploaded.delete(key));
+}
+
+// ------------------------------------------------------------------ animations
+
+/** Frames of an animation on its rig from a fixed camera (frame 0 doubles as the still). */
+function renderAnimation(spec: AnimationSpec, frames: number): string[] {
+  const e = getEngine();
+  const rig = RIGS[spec.rig];
+  const meshes = buildRig(rig);
+  e.root.add(meshes.group);
+  const tracks = buildTracks(spec);
+  const length = animationLength(spec);
+  const times = Array.from({ length: frames }, (_, i) => (frames === 1 ? length * 0.35 : (i / frames) * length));
+  // Frame the whole motion (jumps, steps) so the camera never has to move.
+  const box = new THREE.Box3();
+  for (const t of [...times, ...Array.from({ length: 8 }, (_, i) => (i / 8) * length)]) {
+    applyPose(meshes, poseRig(rig, sampleTracks(tracks, t)));
+    meshes.group.updateMatrixWorld(true);
+    box.expandByObject(meshes.group);
+  }
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(1.5, box.getSize(new THREE.Vector3()).length() / 2);
+  const dir = new THREE.Vector3(0.7, 0.35, -1).normalize();
+  const dist = radius / Math.sin(THREE.MathUtils.degToRad(e.camera.fov) / 2) * 0.82;
+  e.camera.position.copy(center).addScaledVector(dir, dist);
+  e.camera.near = 0.05;
+  e.camera.far = dist * 10;
+  e.camera.updateProjectionMatrix();
+  e.camera.lookAt(center);
+  const out: string[] = [];
+  try {
+    for (const t of times) {
+      applyPose(meshes, poseRig(rig, sampleTracks(tracks, t)));
+      e.renderer.render(e.scene, e.camera);
+      out.push(e.renderer.domElement.toDataURL("image/png"));
+    }
+  } finally {
+    e.root.remove(meshes.group);
+    meshes.dispose();
+  }
+  return out;
+}
+
+const animFrames = new Map<string, Promise<string[]>>();
+
+/** A still (frames = 1) or a looping strip of frames, rendered once per key. */
+export function animationPreview(key: string, spec: AnimationSpec, frames: number): Promise<string[]> {
+  const k = `${key}:${frames}`;
+  let p = animFrames.get(k);
+  if (!p) {
+    p = queue.then(
+      () =>
+        new Promise<string[]>((resolve) =>
+          setTimeout(() => {
+            let out: string[] = [];
+            try {
+              out = renderAnimation(spec, frames);
+            } catch {
+              // No WebGL.
+            }
+            resolve(out);
+          }, 0),
+        ),
+    );
+    queue = p;
+    animFrames.set(k, p);
+    if (animFrames.size > 40) animFrames.delete(animFrames.keys().next().value!);
+  }
+  return p;
 }

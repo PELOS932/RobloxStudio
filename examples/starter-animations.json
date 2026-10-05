@@ -1,0 +1,69 @@
+[
+  {
+    "name": "Idle Breathing",
+    "rig": "R15",
+    "loop": true,
+    "priority": "Idle",
+    "description": "Calm breathing for standing still",
+    "keyframes": [
+      { "t": 0, "ease": "cubic", "poses": { "root": { "pos": [0, 0, 0] }, "waist": [0, 0, 0], "neck": [0, 0, 0], "rightShoulder": [0, 0, 4], "leftShoulder": [0, 0, -4], "rightElbow": [6, 0, 0], "leftElbow": [6, 0, 0] } },
+      { "t": 1.2, "ease": "cubic", "poses": { "root": { "pos": [0, -0.04, 0] }, "waist": [-3, 0, 0], "neck": [3, 0, 0], "rightShoulder": [2, 0, 7], "leftShoulder": [2, 0, -7], "rightElbow": [10, 0, 0], "leftElbow": [10, 0, 0] } },
+      { "t": 2.4, "poses": { "root": { "pos": [0, 0, 0] }, "waist": [0, 0, 0], "neck": [0, 0, 0], "rightShoulder": [0, 0, 4], "leftShoulder": [0, 0, -4], "rightElbow": [6, 0, 0], "leftElbow": [6, 0, 0] } }
+    ]
+  },
+  {
+    "name": "Friendly Wave",
+    "rig": "R15",
+    "loop": true,
+    "description": "Raised right arm waving side to side",
+    "keyframes": [
+      { "t": 0, "ease": "cubic", "poses": { "rightShoulder": [0, 0, 95], "rightElbow": [0, 0, 80], "rightWrist": [0, 0, 0], "neck": [0, 10, -4], "waist": [0, 0, -3], "leftShoulder": [0, 0, -4] } },
+      { "t": 0.3, "ease": "cubic", "poses": { "rightElbow": [0, 0, 125], "rightWrist": [0, 0, 10] } },
+      { "t": 0.6, "ease": "cubic", "poses": { "rightElbow": [0, 0, 80], "rightWrist": [0, 0, -10] } },
+      { "t": 0.9, "ease": "cubic", "poses": { "rightElbow": [0, 0, 125], "rightWrist": [0, 0, 10] } },
+      { "t": 1.2, "poses": { "rightShoulder": [0, 0, 95], "rightElbow": [0, 0, 80], "rightWrist": [0, 0, 0], "neck": [0, 10, -4], "waist": [0, 0, -3], "leftShoulder": [0, 0, -4] } }
+    ]
+  },
+  {
+    "name": "Walk Cycle",
+    "rig": "R15",
+    "loop": true,
+    "priority": "Movement",
+    "description": "One stride per leg; arms swing against the legs",
+    "keyframes": [
+      { "t": 0, "ease": "cubic", "poses": { "root": { "pos": [0, -0.06, 0] }, "waist": [-3, 4, 0], "rightHip": [26, 0, 0], "leftHip": [-24, 0, 0], "rightKnee": [-6, 0, 0], "leftKnee": [-28, 0, 0], "rightAnkle": [-8, 0, 0], "leftAnkle": [16, 0, 0], "rightShoulder": [-22, 0, 3], "leftShoulder": [22, 0, -3], "rightElbow": [12, 0, 0], "leftElbow": [28, 0, 0] } },
+      { "t": 0.25, "ease": "cubic", "poses": { "root": { "pos": [0, 0.08, 0] }, "waist": [-3, 0, 0], "rightHip": [0, 0, 0], "leftHip": [14, 0, 0], "rightKnee": [-8, 0, 0], "leftKnee": [-55, 0, 0], "rightAnkle": [0, 0, 0], "leftAnkle": [10, 0, 0], "rightShoulder": [0, 0, 3], "leftShoulder": [0, 0, -3], "rightElbow": [18, 0, 0], "leftElbow": [18, 0, 0] } },
+      { "t": 0.5, "ease": "cubic", "poses": { "root": { "pos": [0, -0.06, 0] }, "waist": [-3, -4, 0], "rightHip": [-24, 0, 0], "leftHip": [26, 0, 0], "rightKnee": [-28, 0, 0], "leftKnee": [-6, 0, 0], "rightAnkle": [16, 0, 0], "leftAnkle": [-8, 0, 0], "rightShoulder": [22, 0, 3], "leftShoulder": [-22, 0, -3], "rightElbow": [28, 0, 0], "leftElbow": [12, 0, 0] } },
+      { "t": 0.75, "ease": "cubic", "poses": { "root": { "pos": [0, 0.08, 0] }, "waist": [-3, 0, 0], "rightHip": [14, 0, 0], "leftHip": [0, 0, 0], "rightKnee": [-55, 0, 0], "leftKnee": [-8, 0, 0], "rightAnkle": [10, 0, 0], "leftAnkle": [0, 0, 0], "rightShoulder": [0, 0, 3], "leftShoulder": [0, 0, -3], "rightElbow": [18, 0, 0], "leftElbow": [18, 0, 0] } },
+      { "t": 1, "poses": { "root": { "pos": [0, -0.06, 0] }, "waist": [-3, 4, 0], "rightHip": [26, 0, 0], "leftHip": [-24, 0, 0], "rightKnee": [-6, 0, 0], "leftKnee": [-28, 0, 0], "rightAnkle": [-8, 0, 0], "leftAnkle": [16, 0, 0], "rightShoulder": [-22, 0, 3], "leftShoulder": [22, 0, -3], "rightElbow": [12, 0, 0], "leftElbow": [28, 0, 0] } }
+    ]
+  },
+  {
+    "name": "Big Jump",
+    "rig": "R15",
+    "loop": false,
+    "priority": "Action",
+    "description": "Crouch, leap with arms up, tuck, land",
+    "keyframes": [
+      { "t": 0, "ease": "cubic", "dir": "out", "poses": { "root": { "pos": [0, 0, 0] }, "waist": [0, 0, 0], "rightHip": [0, 0, 0], "leftHip": [0, 0, 0], "rightKnee": [0, 0, 0], "leftKnee": [0, 0, 0], "rightAnkle": [0, 0, 0], "leftAnkle": [0, 0, 0], "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0] } },
+      { "t": 0.3, "ease": "cubic", "dir": "out", "poses": { "root": { "pos": [0, -0.65, 0] }, "waist": [-18, 0, 0], "rightHip": [42, 0, 0], "leftHip": [42, 0, 0], "rightKnee": [-72, 0, 0], "leftKnee": [-72, 0, 0], "rightAnkle": [30, 0, 0], "leftAnkle": [30, 0, 0], "rightShoulder": [-35, 0, 6], "leftShoulder": [-35, 0, -6] } },
+      { "t": 0.5, "ease": "cubic", "dir": "out", "poses": { "root": { "pos": [0, 1.8, 0] }, "waist": [6, 0, 0], "rightHip": [-4, 0, 0], "leftHip": [-4, 0, 0], "rightKnee": [-6, 0, 0], "leftKnee": [-6, 0, 0], "rightAnkle": [-25, 0, 0], "leftAnkle": [-25, 0, 0], "rightShoulder": [165, 0, 10], "leftShoulder": [165, 0, -10] } },
+      { "t": 0.72, "ease": "cubic", "dir": "in", "poses": { "root": { "pos": [0, 2.4, 0] }, "waist": [-8, 0, 0], "rightHip": [45, 0, 0], "leftHip": [45, 0, 0], "rightKnee": [-60, 0, 0], "leftKnee": [-60, 0, 0], "rightAnkle": [0, 0, 0], "leftAnkle": [0, 0, 0], "rightShoulder": [120, 0, 25], "leftShoulder": [120, 0, -25] } },
+      { "t": 0.95, "ease": "cubic", "poses": { "root": { "pos": [0, -0.5, 0] }, "waist": [-14, 0, 0], "rightHip": [36, 0, 0], "leftHip": [36, 0, 0], "rightKnee": [-62, 0, 0], "leftKnee": [-62, 0, 0], "rightAnkle": [26, 0, 0], "leftAnkle": [26, 0, 0], "rightShoulder": [45, 0, 20], "leftShoulder": [45, 0, -20] } },
+      { "t": 1.3, "poses": { "root": { "pos": [0, 0, 0] }, "waist": [0, 0, 0], "rightHip": [0, 0, 0], "leftHip": [0, 0, 0], "rightKnee": [0, 0, 0], "leftKnee": [0, 0, 0], "rightAnkle": [0, 0, 0], "leftAnkle": [0, 0, 0], "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0] } }
+    ]
+  },
+  {
+    "name": "Sword Slash",
+    "rig": "R6",
+    "loop": false,
+    "priority": "Action",
+    "description": "Classic R6 overhead slash",
+    "keyframes": [
+      { "t": 0, "ease": "cubic", "dir": "out", "poses": { "root": [0, 0, 0], "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "neck": [0, 0, 0], "rightHip": [0, 0, 0], "leftHip": [0, 0, 0] } },
+      { "t": 0.35, "ease": "cubic", "dir": "in", "poses": { "root": [0, 25, 0], "rightShoulder": [165, 0, 15], "leftShoulder": [25, 0, -10], "neck": [8, -20, 0], "rightHip": [-12, 0, 0], "leftHip": [12, 0, 0] } },
+      { "t": 0.55, "ease": "cubic", "dir": "out", "poses": { "root": [-4, -30, 0], "rightShoulder": [-25, 0, -20], "leftShoulder": [-20, 0, -8], "neck": [-10, 25, 0], "rightHip": [18, 0, 0], "leftHip": [-14, 0, 0] } },
+      { "t": 1.1, "poses": { "root": [0, 0, 0], "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "neck": [0, 0, 0], "rightHip": [0, 0, 0], "leftHip": [0, 0, 0] } }
+    ]
+  }
+]

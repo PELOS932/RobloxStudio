@@ -113,9 +113,9 @@ export function Library() {
           )}
         </div>
         <div className="seg">
-          {(["all", "model", "ui", "script"] as const).map((k) => (
+          {(["all", "model", "ui", "script", "animation"] as const).map((k) => (
             <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>
-              {k === "all" ? "All" : k === "model" ? "Models" : k === "ui" ? "UI" : "Scripts"}
+              {k === "all" ? "All" : k === "model" ? "Models" : k === "ui" ? "UI" : k === "script" ? "Scripts" : "Anims"}
             </button>
           ))}
         </div>
@@ -145,7 +145,7 @@ export function Library() {
             asset={a}
             view={view}
             active={a.id === activeId}
-            spin={hover === a.id && a.kind === "model"}
+            spin={hover === a.id && (a.kind === "model" || a.kind === "animation")}
             game={filter === "all" ? gameName(a.gameId) : undefined}
             onHover={(on) => setHover(on ? a.id : null)}
           />
@@ -288,7 +288,9 @@ function Card({ asset: a, view, active, spin, game, onHover }: {
   asset: AssetSummary; view: "grid" | "list"; active: boolean; spin: boolean; game?: string; onHover: (on: boolean) => void;
 }) {
   const inStudio = a.lastImport && a.lastImport.version === a.version;
-  const meta = `${a.kind === "model" ? "Model" : a.kind === "ui" ? "UI" : "Script"} · ${sizeLabel(a.kind, a.size)} · ${timeAgo(a.updatedAt)}`;
+  const meta = a.kind === "animation"
+    ? `Animation · ${a.detail ?? sizeLabel(a.kind, a.size)} · ${timeAgo(a.updatedAt)}`
+    : `${a.kind === "model" ? "Model" : a.kind === "ui" ? "UI" : "Script"} · ${sizeLabel(a.kind, a.size)} · ${timeAgo(a.updatedAt)}`;
   return (
     <div
       className={`lib-card ${active ? "active" : ""}`}

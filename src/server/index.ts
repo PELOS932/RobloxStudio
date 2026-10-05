@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -14,6 +14,7 @@ import { parsePath, PlaceReader } from "./place.ts";
 import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
+import { AnimationSpecSchema, sanitizeAnimationSpec } from "../shared/animation.ts";
 import type { Asset } from "../shared/assets.ts";
 import type { BootState, ClientEvent, ServerEvent, Settings, StudioStatus } from "../shared/protocol.ts";
 
@@ -150,7 +151,10 @@ api.post("/assets", (req, res) => {
   } else if (kind === "script") {
     const s = ScriptSpecSchema.parse(spec);
     asset = { ...base, id: prev?.id ?? shortId("s_"), kind, name: s.name, spec: s };
-  } else return void res.status(400).json({ error: "kind must be model, ui or script" });
+  } else if (kind === "animation") {
+    const s = sanitizeAnimationSpec(AnimationSpecSchema.parse(spec));
+    asset = { ...base, id: prev?.id ?? shortId("a_"), kind, name: s.name, spec: s, ...(s.description ? { description: s.description } : {}) };
+  } else return void res.status(400).json({ error: "kind must be model, ui, script or animation" });
   res.json(assets.put(asset, true));
 });
 
@@ -195,6 +199,21 @@ api.put("/assets/:id/thumb", (req, res) => {
   const m = String(req.body?.dataUrl ?? "").match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
   if (!m || m[1].length > 2_000_000) return void res.status(400).json({ error: "expected a PNG data URL" });
   res.json({ ok: assets.putThumb(String(req.params.id), Number(req.body?.version), Buffer.from(m[1], "base64")) });
+});
+
+/** Add the bundled starter animations (idle, wave, walk, jump, sword slash) to the library. */
+api.post("/animations/starters", (_req, res) => {
+  const list = JSON.parse(readFileSync(join(ROOT, "examples", "starter-animations.json"), "utf8")) as unknown[];
+  const now = Date.now();
+  const created = list.map((raw, i) => {
+    const spec = sanitizeAnimationSpec(AnimationSpecSchema.parse(raw));
+    const asset: Asset = {
+      id: shortId("a_"), kind: "animation", name: spec.name, spec, createdAt: now + i, updatedAt: now + i, version: 1, origin: "user",
+      ...(spec.description ? { description: spec.description } : {}), ...(games.currentId ? { gameId: games.currentId } : {}),
+    };
+    return assets.put(asset, false).id;
+  });
+  res.json({ ids: created });
 });
 
 // Games ---------------------------------------------------------------------
