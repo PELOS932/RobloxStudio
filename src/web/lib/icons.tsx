@@ -49,6 +49,7 @@ const paths = {
   logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
   shield: "M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6z",
   info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8h.01",
+  alert: "M12 3l10 18H2zM12 10v4M12 17.5h.01",
 } as const;
 
 export type IconName = keyof typeof paths;

@@ -6,6 +6,7 @@ import { Icon } from "../lib/icons.tsx";
 import { MODELS, cacheRate, fmtTokens } from "./Chat.tsx";
 import { highlightLuau } from "./ScriptView.tsx";
 import { MOD } from "./CommandPalette.tsx";
+import { PlanMeters, SessionBadge } from "./PlanUsage.tsx";
 
 export function TopBar() {
   const claude = useStore((s) => s.claude);
@@ -39,6 +40,7 @@ export function TopBar() {
       <button className="status-btn" onClick={() => useStore.setState({ settingsOpen: "account" })} title="Claude Code account">
         <i className={`sq ${claudeDot}`} />
         <span className="label">{claudeLabel}</span>
+        <SessionBadge />
       </button>
       <button className="status-btn" onClick={() => useStore.setState({ rightTab: "studio", mobileView: "panel" })} title="Roblox Studio connection">
         <i className={`sq ${studioDot}`} />
@@ -105,6 +107,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-foot">
+        <PlanMeters />
         <dl className="usage-stats" title="Totals across all chats. Cost is the API-equivalent price; Claude subscriptions are not billed per token.">
           <div>
             <dt>prompt cache</dt>

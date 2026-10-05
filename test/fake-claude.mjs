@@ -22,6 +22,22 @@ if (args[0] === "auth" && args[1] === "status") {
   process.exit(0);
 }
 
+// Like Claude Code, report subscription usage with each request (utilization 0..1, seconds).
+const resetIn = (s) => Math.floor(Date.now() / 1000) + s;
+const rateLimit = (session, week) => ({
+  type: "rate_limit_event",
+  rate_limit_info: {
+    status: "allowed", resetsAt: resetIn(3 * 3600), rateLimitType: "five_hour", overageStatus: "rejected", overageDisabledReason: "out_of_credits", isUsingOverage: false,
+    unifiedWindows: { five_hour: { utilization: session, resetsAt: resetIn(3 * 3600) }, seven_day: { utilization: week, resetsAt: resetIn(4 * 86400) } },
+  },
+});
+// Usage check from Studio Forge: one tiny request with no tools.
+if (!args.includes("--input-format") && args.includes("--tools") && args[args.indexOf("--tools") + 1] === "") {
+  process.stdout.write(JSON.stringify({ ...rateLimit(0.31, 0.12), session_id: "probe" }) + "\n");
+  setTimeout(() => process.exit(0), 5000); // Studio Forge should stop it once usage arrives
+  await new Promise(() => {});
+}
+
 const required = ["-p", "--input-format", "--output-format", "--verbose", "--include-partial-messages", "--mcp-config", "--append-system-prompt-file", "--permission-prompt-tool", "--allowedTools"];
 for (const r of required) if (!args.includes(r)) {
   console.error(`missing flag ${r}`);
@@ -82,6 +98,7 @@ const lantern = {
 for await (const line of createInterface({ input: process.stdin })) {
   const msg = JSON.parse(line);
   const prompt = msg.message.content.find((c) => c.type === "text")?.text ?? "";
+  out(rateLimit(0.05 + 0.01 * apiCount, 0.04));
   if (!initSent) {
     initSent = true;
     out({ type: "system", subtype: "init", model: arg("--model"), tools: [], mcp_servers: [{ name: "forge", status: "connected" }] });

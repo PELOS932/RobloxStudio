@@ -9,17 +9,26 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bus, conversations, shortId } from "./store.ts";
 import { DATA_DIR, MCP_TOKEN } from "./config.ts";
 import { FORGE_SYSTEM_PROMPT } from "./system-prompt.ts";
 import type { ForgeMcp } from "./forge-mcp.ts";
 import type {
-  Block, ChatMessage, ClaudeStatus, Conversation, ConvStatus, QueuedMessage, Settings, TurnUsage,
+  Block, ChatMessage, ClaudeStatus, Conversation, ConvStatus, PlanUsage, QueuedMessage, Settings, TurnUsage, UsageWindow,
 } from "../shared/protocol.ts";
 
 const IDLE_KILL_MS = 20 * 60_000;
+const LIMITS_FILE = join(DATA_DIR, "plan-usage.json");
+
+function readLimits(): PlanUsage | null {
+  try {
+    return JSON.parse(readFileSync(LIMITS_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
 const RUN_DIR = join(DATA_DIR, "run");
 const PROMPT_FILE = join(RUN_DIR, "system-prompt.md");
 
@@ -27,6 +36,31 @@ export interface ClaudeDeps {
   getSettings: () => Settings;
   forge: ForgeMcp;
   port: number;
+  /** Claude Code reported subscription usage (rate_limit_event). */
+  onLimits?: (info: unknown) => void;
+}
+
+const toMs = (v: unknown) => (typeof v === "number" && v > 0 ? (v < 1e12 ? v * 1000 : v) : undefined);
+
+/** Normalize Claude Code's rate_limit_info; windows missing from this event keep their previous values. */
+export function parsePlanUsage(raw: any, previous: PlanUsage | null = null): PlanUsage | null {
+  if (!raw || typeof raw !== "object") return previous;
+  const windows: Record<string, UsageWindow> = { ...(previous?.windows ?? {}) };
+  for (const [key, value] of Object.entries(raw.unifiedWindows ?? {})) {
+    const w = value as any;
+    if (typeof w?.utilization === "number") windows[key] = { utilization: w.utilization, resetsAt: toMs(w.resetsAt) };
+  }
+  if (typeof raw.utilization === "number" && raw.rateLimitType) {
+    windows[raw.rateLimitType] = { utilization: raw.utilization, resetsAt: toMs(raw.resetsAt) };
+  }
+  return {
+    status: String(raw.status ?? "allowed"),
+    limitType: raw.rateLimitType ?? undefined,
+    resetsAt: toMs(raw.resetsAt),
+    windows,
+    overage: { status: raw.overageStatus ?? undefined, disabledReason: raw.overageDisabledReason ?? undefined, inUse: !!raw.isUsingOverage },
+    updatedAt: Date.now(),
+  };
 }
 
 interface Pending {
@@ -305,6 +339,10 @@ class ClaudeSession {
   }
 
   private onEvent(obj: any) {
+    if (obj.type === "rate_limit_event") {
+      this.deps.onLimits?.(obj.rate_limit_info);
+      return;
+    }
     const conv = this.conv;
     if (!conv) return;
     if (obj.type === "system" && obj.subtype === "init") {
@@ -535,8 +573,22 @@ export class ClaudeManager {
   status: ClaudeStatus = { cli: "unknown" };
   private sessions = new Map<string, ClaudeSession>();
   private loginProc: ChildProcess | null = null;
+  /** Subscription usage last reported by Claude Code (kept across restarts). */
+  limits: PlanUsage | null = readLimits();
 
-  constructor(private deps: ClaudeDeps) {}
+  constructor(private deps: ClaudeDeps) {
+    deps.onLimits = (info) => {
+      const next = parsePlanUsage(info, this.limits);
+      if (!next) return;
+      this.limits = next;
+      try {
+        writeFileSync(LIMITS_FILE, JSON.stringify(next));
+      } catch {
+        // Not critical: it is refreshed on the next reply.
+      }
+      bus.emitEvent({ type: "limits", limits: next });
+    };
+  }
 
   private session(convId: string) {
     let s = this.sessions.get(convId);
@@ -556,6 +608,49 @@ export class ClaudeManager {
 
   toolProgress(convId: string, toolName: string, text: string) {
     this.sessions.get(convId)?.toolProgress(toolName, text);
+  }
+
+  private probe: Promise<PlanUsage | null> | null = null;
+
+  /**
+   * Fresh plan usage without waiting for the next chat turn. Claude Code only reports usage
+   * alongside a model request, so this sends one tiny Haiku request with no tools or MCP
+   * servers and stops it as soon as the usage arrives.
+   */
+  checkLimits(): Promise<PlanUsage | null> {
+    if (this.probe) return this.probe;
+    const settings = this.deps.getSettings();
+    mkdirSync(RUN_DIR, { recursive: true });
+    const args = ["-p", "Reply with OK.", "--model", "haiku", "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--output-format", "stream-json", "--verbose"];
+    this.probe = new Promise<PlanUsage | null>((resolve, reject) => {
+      const proc = spawnCli(settings.claudePath, args, { cwd: RUN_DIR, env: cliEnv(settings), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      let got = false;
+      let err = "";
+      const timer = setTimeout(() => proc.kill(), 60_000);
+      createInterface({ input: proc.stdout! }).on("line", (line) => {
+        if (got || !line.includes('"rate_limit_event"')) return;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type !== "rate_limit_event") return;
+          got = true;
+          this.deps.onLimits?.(obj.rate_limit_info);
+          proc.kill();
+        } catch {
+          // ignore partial or unrelated lines
+        }
+      });
+      proc.stderr!.on("data", (d) => (err += d));
+      proc.on("error", (e) => {
+        clearTimeout(timer);
+        reject((e as NodeJS.ErrnoException).code === "ENOENT" ? new Error(`Claude Code CLI not found ("${settings.claudePath}").`) : e);
+      });
+      proc.on("exit", () => {
+        clearTimeout(timer);
+        if (got) resolve(this.limits);
+        else reject(new Error(err.trim().split("\n").pop() || "Claude Code didn't report plan usage. Plan limits only apply when it is signed in with a Claude subscription."));
+      });
+    }).finally(() => (this.probe = null));
+    return this.probe;
   }
 
   running(): Record<string, ConvStatus> {

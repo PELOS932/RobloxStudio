@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, socket } from "./lib/api.ts";
 import type {
   Asset, AssetSummary, ChatMessage, ClaudeStatus, Conversation, ConversationMeta, ConvStatus,
-  HtmlConvertRequest, ImportResult, PermissionRequest, QueuedMessage, ServerEvent, Settings, StudioStatus,
+  HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
 export type RightTab = "preview" | "assets" | "studio";
@@ -23,6 +23,8 @@ interface State {
   activeConvId: string | null;
   running: Record<string, ConvStatus>;
   queues: Record<string, QueuedMessage[]>;
+  /** Claude subscription usage (live while Claude works). */
+  limits: PlanUsage | null;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -55,6 +57,7 @@ export const useStore = create<State>(() => ({
   activeConvId: null,
   running: {},
   queues: {},
+  limits: null,
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -108,6 +111,7 @@ function onEvent(e: ServerEvent) {
         claude: s.claude,
         running: s.running,
         queues: s.queues ?? {},
+        limits: s.limits ?? null,
         permissions: s.permissions,
         activeAssetId: st.activeAssetId ?? s.assets[0]?.id ?? null,
       }));
@@ -155,6 +159,9 @@ function onEvent(e: ServerEvent) {
       break;
     case "queue":
       set((s) => ({ queues: { ...s.queues, [e.convId]: e.items } }));
+      break;
+    case "limits":
+      set({ limits: e.limits });
       break;
     case "asset":
       set((s) => {

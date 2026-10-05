@@ -119,6 +119,26 @@ export interface PermissionRequest {
   createdAt: number;
 }
 
+/** One subscription usage window as Claude Code reports it (utilization 0..1). */
+export interface UsageWindow {
+  utilization: number;
+  /** ms since epoch */
+  resetsAt?: number;
+}
+
+/** Claude subscription usage, from Claude Code's rate_limit_event (same data as /usage). */
+export interface PlanUsage {
+  /** "allowed", "allowed_warning" (close to a limit) or "rejected" (limit reached). */
+  status: string;
+  /** The window the status refers to, e.g. "five_hour" or "seven_day". */
+  limitType?: string;
+  resetsAt?: number;
+  /** e.g. five_hour, seven_day, seven_day_opus */
+  windows: Record<string, UsageWindow>;
+  overage?: { status?: string; disabledReason?: string; inUse?: boolean };
+  updatedAt: number;
+}
+
 export interface BootState {
   settings: Settings;
   conversations: ConversationMeta[];
@@ -129,6 +149,8 @@ export interface BootState {
   /** Follow-up messages waiting for the current turn to finish, per conversation. */
   queues: Record<string, QueuedMessage[]>;
   permissions: PermissionRequest[];
+  /** Latest subscription usage (null until Claude Code has reported it). */
+  limits: PlanUsage | null;
 }
 
 export interface QueuedMessage {
@@ -152,6 +174,7 @@ export type ServerEvent =
   | { type: "message"; convId: string; message: ChatMessage }
   | { type: "status"; convId: string; status: ConvStatus; error?: string }
   | { type: "queue"; convId: string; items: QueuedMessage[] }
+  | { type: "limits"; limits: PlanUsage }
   | { type: "asset"; asset: AssetSummary; focus?: boolean }
   | { type: "asset.deleted"; id: string }
   | { type: "studio"; status: StudioStatus }

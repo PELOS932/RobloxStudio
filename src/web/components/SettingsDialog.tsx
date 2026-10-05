@@ -3,6 +3,7 @@ import { api } from "../lib/api.ts";
 import { Icon } from "../lib/icons.tsx";
 import { toast, updateSettings, useStore } from "../store.ts";
 import { MODELS } from "./Chat.tsx";
+import { PlanUsageCard } from "./PlanUsage.tsx";
 import type { Settings } from "../../shared/protocol.ts";
 
 type Section = "general" | "account" | "studio" | "import" | "advanced";
@@ -152,6 +153,8 @@ function Account() {
           </p>
         )}
       </div>
+
+      {claude.cli === "ok" && claude.loggedIn && <PlanUsageCard />}
 
       <div className="card">
         <h3><Icon name="user" /> Connect your Claude account</h3>

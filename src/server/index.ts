@@ -84,6 +84,7 @@ function bootState(): BootState {
     claude: claude.status,
     running: claude.running(),
     queues: claude.queues(),
+    limits: claude.limits,
     permissions: forge.pendingPermissions,
   };
 }
@@ -245,6 +246,7 @@ api.post("/studio/screenshot", wrap(async (_req, res) => {
 
 // Claude Code ---------------------------------------------------------------
 api.post("/claude/refresh", wrap(async (_req, res) => res.json(await claude.refreshStatus())));
+api.post("/claude/limits", wrap(async (_req, res) => res.json({ limits: await claude.checkLimits() })));
 api.post("/claude/login", (req, res) => {
   claude.startLogin(req.body?.method === "console" ? "console" : "claudeai");
   res.json({ ok: true });

@@ -185,6 +185,23 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect((await api(`/api/assets/${v1.id}/restore`, { method: "POST", body: JSON.stringify({ version: 9 }) })).status).toBe(404);
   });
 
+  it("reports Claude plan usage live, and checks it on demand", async () => {
+    // Every turn carries Claude Code's rate_limit_event; the server normalizes it (seconds → ms).
+    const live = await waitFor("limits");
+    expect(live.limits).toMatchObject({ status: "allowed", limitType: "five_hour", overage: { status: "rejected", inUse: false } });
+    expect(live.limits.windows.five_hour.utilization).toBeGreaterThan(0);
+    expect(live.limits.windows.seven_day).toMatchObject({ utilization: 0.04 });
+    expect(live.limits.windows.seven_day.resetsAt).toBeGreaterThan(Date.now() + 3 * 86_400_000);
+    expect((await api("/api/state")).body.limits.windows.seven_day.utilization).toBe(0.04);
+
+    // "Check now" runs one tiny request and stops it as soon as usage arrives.
+    const started = Date.now();
+    const r = (await api("/api/claude/limits", { method: "POST" })).body;
+    expect(Date.now() - started).toBeLessThan(4000);
+    expect(r.limits.windows).toMatchObject({ five_hour: { utilization: 0.31 }, seven_day: { utilization: 0.12 } });
+    await waitFor("limits", (e) => e.limits.windows.five_hour.utilization === 0.31);
+  });
+
   it("runs Luau from the Studio console endpoint", async () => {
     const r = (await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: "return #workspace:GetChildren()" }) })).body;
     expect(r).toMatchObject({ ok: true });

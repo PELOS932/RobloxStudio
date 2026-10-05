@@ -8,6 +8,7 @@ import { Icon, type IconName } from "../lib/icons.tsx";
 import { api } from "../lib/api.ts";
 import { highlightLuau } from "./ScriptView.tsx";
 import { AssetThumb } from "./AssetThumb.tsx";
+import { LimitNotice } from "./PlanUsage.tsx";
 import { approxTokens, describeCall, fmtDuration, ToolCalls, useNow } from "./ToolCall.tsx";
 import { sizeLabel, type AssetKind } from "../../shared/assets.ts";
 import type { Block, ChatMessage, Effort, TurnUsage } from "../../shared/protocol.ts";
@@ -841,6 +842,7 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
   return (
     <div className="composer-dock">
       {children}
+      <LimitNotice />
       {queue.length > 0 && (
         <ol className="queue" aria-label="Queued messages">
           {queue.map((q, i) => (
