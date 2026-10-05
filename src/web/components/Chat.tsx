@@ -8,6 +8,7 @@ import { Icon, type IconName } from "../lib/icons.tsx";
 import { api } from "../lib/api.ts";
 import { highlightLuau } from "./ScriptView.tsx";
 import { AssetThumb } from "./AssetThumb.tsx";
+import { approxTokens, describeCall, fmtDuration, ToolCalls, useNow } from "./ToolCall.tsx";
 import { sizeLabel, type AssetKind } from "../../shared/assets.ts";
 import type { Block, ChatMessage, Effort, TurnUsage } from "../../shared/protocol.ts";
 
@@ -407,11 +408,11 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
         ) : s.kind === "thinking" ? (
           <Thinking key={i} text={s.text} live={live && i === segs.length - 1} />
         ) : (
-          <Steps key={i} tools={s.tools} live={live} />
+          <ToolCalls key={i} tools={s.tools} />
         ),
       )}
       {assetIds.map((id) => <AssetCard key={id} id={id} />)}
-      {live && !streamingText && <LiveStatus message={message} />}
+      {live && <LiveStatus message={message} />}
       {message.error && (
         <div className="msg-error">
           <Icon name="x" size={13} />
@@ -474,12 +475,22 @@ function MentionChip({ id }: { id: string }) {
 }
 
 function Thinking({ text, live }: { text: string; live: boolean }) {
+  // While Claude thinks, the newest lines stream in (like Claude Code); afterwards it folds away.
+  if (live) {
+    return (
+      <div className="thinking live">
+        <div className="thinking-head">
+          <span className="spinner" /> Thinking…
+        </div>
+        <div className="thinking-live">{text.split("\n").slice(-6).join("\n")}</div>
+      </div>
+    );
+  }
   return (
     <details className="thinking">
       <summary>
         <Icon name="chevronRight" size={12} className="chev" />
-        {live ? "Thinking" : "Thought process"}
-        {live && <span className="spinner" />}
+        Thought process
       </summary>
       <div className="thinking-body">{text}</div>
     </details>
@@ -488,29 +499,33 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
 
 function liveLabel(message: ChatMessage): string {
   const running = [...message.blocks].reverse().find((b): b is Extract<Block, { type: "tool" }> => b.type === "tool" && b.status === "running");
-  if (!running) return message.blocks.length ? "Thinking" : "Starting";
+  const last = message.blocks[message.blocks.length - 1];
+  if (!running) return !last ? "Starting" : last.type === "text" ? "Writing" : "Thinking";
   const n = running.name.replace(/^mcp__forge__/, "");
+  if (running.inputPartial !== undefined) return n === "create_model" || n === "edit_model" ? "Designing the model" : /ui/.test(n) ? "Designing the UI" : "Preparing the next step";
   if (n === "create_model" || n === "edit_model") return "Building the model";
-  if (n.includes("ui")) return "Designing the UI";
+  if (n.includes("ui")) return "Building the UI";
   if (n === "create_script") return "Writing the script";
   if (n === "import_to_studio") return "Importing into Studio";
-  if (n.startsWith("studio_")) return "Working in Studio";
-  if (n === "permission_prompt") return "Waiting for your approval";
-  return "Working";
+  if (n.startsWith("studio_")) return running.progress?.startsWith("Waiting for your approval") ? "Waiting for your approval" : "Working in Studio";
+  if (n === "Bash") return "Running a command";
+  if (n === "TodoWrite") return "Planning";
+  return `Running ${describeCall(running).label}`;
 }
 
+/** Claude Code-style status line: what's happening, elapsed time, output so far, how to stop. */
 function LiveStatus({ message }: { message: ChatMessage }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const secs = Math.max(0, Math.floor((now - message.createdAt) / 1000));
+  const now = useNow(true);
+  const tokens = approxTokens(message.blocks);
   return (
     <div className="live-status">
-      <span className="spinner" />
-      <span>{liveLabel(message)}</span>
-      <span className="elapsed">{secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`}</span>
+      <span className="live-mark">✻</span>
+      <span>{liveLabel(message)}…</span>
+      <span className="live-meta">
+        {fmtDuration(Math.max(0, now - message.createdAt))}
+        {tokens > 0 && ` · ↓ ${fmtTokens(tokens)} tokens`}
+        {" · esc to interrupt"}
+      </span>
     </div>
   );
 }
@@ -627,113 +642,6 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 }
 
 // ---------------------------------------------------------------------------
-
-const TOOL_META: Record<string, { icon: IconName; title: string }> = {
-  create_model: { icon: "cube", title: "Built model" },
-  edit_model: { icon: "cube", title: "Edited model" },
-  create_ui: { icon: "layout", title: "Designed UI" },
-  edit_ui: { icon: "layout", title: "Edited UI" },
-  create_ui_html: { icon: "layout", title: "Designed UI (HTML)" },
-  edit_ui_html: { icon: "layout", title: "Edited UI (HTML)" },
-  create_script: { icon: "code", title: "Wrote script" },
-  list_assets: { icon: "grid", title: "Listed assets" },
-  get_asset: { icon: "eye", title: "Read asset" },
-  import_to_studio: { icon: "upload", title: "Imported to Studio" },
-  studio_pull_selection: { icon: "download", title: "Pulled Studio selection" },
-  studio_execute_luau: { icon: "terminal", title: "Ran Luau in Studio" },
-  studio_search_tree: { icon: "search", title: "Searched the place" },
-  studio_inspect: { icon: "eye", title: "Inspected instance" },
-  studio_script_read: { icon: "code", title: "Read script" },
-  studio_script_edit: { icon: "code", title: "Edited script in Studio" },
-  studio_screenshot: { icon: "camera", title: "Studio snapshot" },
-  studio_console: { icon: "terminal", title: "Read Studio output" },
-  studio_state: { icon: "plug", title: "Checked Studio state" },
-  studio_play: { icon: "play", title: "Play-test" },
-};
-
-function toolSubject(name: string, input: any): string {
-  if (!input || typeof input !== "object") return "";
-  if (input.name && typeof input.name === "string") return input.name;
-  if (name === "studio_execute_luau" && typeof input.code === "string") return input.code.split("\n")[0].slice(0, 80);
-  if (input.path) return String(input.path);
-  if (input.file_path) return String(input.file_path);
-  if (input.command) return String(input.command).slice(0, 80);
-  if (input.id) return String(input.id);
-  if (input.pattern) return String(input.pattern);
-  return "";
-}
-
-function Steps({ tools, live }: { tools: Extract<Block, { type: "tool" }>[]; live: boolean }) {
-  const running = tools.some((t) => t.status === "running");
-  const failed = tools.filter((t) => t.status === "error" || t.status === "denied").length;
-  const [open, setOpen] = useState<boolean | null>(null);
-  const expanded = open ?? (running || tools.length <= 4);
-  return (
-    <div className={`steps ${expanded ? "open" : ""}`}>
-      <button className="steps-head" onClick={() => setOpen(!expanded)}>
-        <Icon name="chevronRight" size={12} className="chev" />
-        <span>
-          {tools.length} tool call{tools.length > 1 ? "s" : ""}
-        </span>
-        {failed > 0 && <span className="bad">· {failed} failed</span>}
-      </button>
-      {expanded && (
-        <ol className="step-list">
-          {tools.map((t) => <StepRow key={t.id} block={t} live={live} />)}
-        </ol>
-      )}
-    </div>
-  );
-}
-
-function StepRow({ block }: { block: Extract<Block, { type: "tool" }>; live: boolean }) {
-  const [open, setOpen] = useState(false);
-  const short = block.name.replace(/^mcp__forge__/, "");
-  const isForge = short !== block.name;
-  const meta = TOOL_META[short] ?? { icon: "wrench" as IconName, title: isForge ? short.replace(/_/g, " ") : block.name };
-  const input = block.input as any;
-  const subject = toolSubject(short, input);
-  const note = block.result?.text.split("\n").find((l) => /Imported|Updated in Studio|failed|not applied|No /i.test(l));
-  let detail: ReactNode = null;
-  if (open) {
-    let inputView: ReactNode = null;
-    if (short === "studio_execute_luau" && typeof input?.code === "string") {
-      inputView = <pre>{highlightLuau(input.code).map((l, i) => <div key={i}>{l.length ? l : " "}</div>)}</pre>;
-    } else if (input && Object.keys(input).length) {
-      const json = JSON.stringify(input, null, 2);
-      inputView = <pre>{json.length > 6000 ? json.slice(0, 6000) + "\n…" : json}</pre>;
-    }
-    detail = (
-      <div className="step-detail">
-        {inputView && <span className="tool-label">input · {short}</span>}
-        {inputView}
-        {block.inputPartial && <pre>{block.inputPartial.slice(-2000)}</pre>}
-        {block.result?.text && (
-          <>
-            <span className="tool-label">result</span>
-            <pre>{block.result.text}</pre>
-          </>
-        )}
-      </div>
-    );
-  }
-  const bad = block.status === "error" || block.status === "denied";
-  return (
-    <li className={`step ${block.status}`}>
-      <button className="step-line" onClick={() => setOpen((v) => !v)} title={open ? "Hide details" : "Show input and result"}>
-        <span className="step-glyph">
-          {block.status === "running" ? <span className="spinner" /> : <Icon name={block.status === "done" ? "check" : block.status === "denied" ? "shield" : "x"} size={12} />}
-        </span>
-        <span className="step-title">{meta.title}</span>
-        {subject && <span className="step-subject">{subject}</span>}
-        {block.status === "denied" && <span className="step-tag">declined</span>}
-      </button>
-      {note && !open && <div className={`step-note ${bad || /fail|not applied/i.test(note) ? "bad" : ""}`}>{note.replace(/\.$/, "")}</div>}
-      {block.result?.images?.map((src, i) => <img key={i} className="step-image" src={src} alt="Studio viewport" />)}
-      {detail}
-    </li>
-  );
-}
 
 function AssetCard({ id }: { id: string }) {
   const asset = useStore((s) => s.assets.find((a) => a.id === id));

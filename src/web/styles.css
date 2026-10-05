@@ -646,7 +646,11 @@ button.chat-title:focus-visible svg {
   font-size: 13px;
   color: var(--text-dim);
 }
-.live-status .elapsed {
+.live-mark {
+  color: var(--text);
+  animation: blink 1.4s ease-in-out infinite;
+}
+.live-meta {
   font: 12px var(--mono);
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
@@ -783,8 +787,7 @@ button.chat-title:focus-visible svg {
 }
 
 /* Thinking and tool calls share one quiet disclosure style. */
-.thinking summary,
-.steps-head {
+.thinking summary {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -800,21 +803,15 @@ button.chat-title:focus-visible svg {
 .thinking summary::-webkit-details-marker {
   display: none;
 }
-.thinking summary:hover,
-.steps-head:hover {
+.thinking summary:hover {
   color: var(--text-dim);
 }
-.thinking .chev,
-.steps-head .chev {
+.thinking .chev {
   flex: none;
   transition: transform 0.12s;
 }
-.thinking[open] .chev,
-.steps.open .chev {
+.thinking[open] .chev {
   transform: rotate(90deg);
-}
-.steps-head .bad {
-  color: var(--danger);
 }
 .thinking-body {
   max-height: 300px;
@@ -828,88 +825,188 @@ button.chat-title:focus-visible svg {
   color: var(--text-faint);
 }
 
-/* Tool calls: a log, one line per call. */
-.step-list {
+/* Tool calls, Claude Code style: "● Tool(args)" then "⎿" lines (live input, progress, result). */
+.calls {
   display: grid;
-  gap: 1px;
-  margin: 4px 0 0 5px;
-  padding: 2px 0 2px 8px;
-  border-left: 1px solid var(--border-strong);
+  gap: 10px;
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
-.step {
+.call {
   min-width: 0;
 }
-.step-line {
+.call-head {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 2px 6px;
+  padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  background: none;
   text-align: left;
-  font: 12px/20px var(--mono);
-  color: var(--text-dim);
-}
-.step-line:hover {
-  background: var(--elev);
-}
-.step-glyph {
-  display: grid;
-  place-items: center;
-  width: 14px;
-  flex: none;
-  color: var(--text-faint);
-}
-.step.done .step-glyph {
-  color: var(--success);
-}
-.step.error .step-glyph {
-  color: var(--danger);
-}
-.step.denied .step-glyph {
-  color: var(--warning);
-}
-.step-title {
+  font: 13px/20px var(--font);
   color: var(--text);
+}
+.call-dot {
+  width: 8px;
+  height: 8px;
+  margin: 0 3px 0 2px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+.call.done .call-dot {
+  background: var(--success);
+}
+.call.error .call-dot {
+  background: var(--danger);
+}
+.call.denied .call-dot {
+  background: var(--warning);
+}
+.call.running .call-dot {
+  background: var(--text);
+  animation: blink 1s steps(2) infinite;
+}
+.call-label {
+  font-weight: 600;
   white-space: nowrap;
 }
-.step-subject {
+.call-head:hover .call-label {
+  text-decoration: underline;
+  text-decoration-color: var(--text-faint);
+  text-underline-offset: 3px;
+}
+.call-args {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-faint);
+  font: 12.5px/20px var(--mono);
+  color: var(--text-dim);
 }
-.step-tag {
+.call-tag {
+  font: 11px var(--mono);
   color: var(--warning);
   white-space: nowrap;
 }
-.step-note {
-  padding: 0 6px 2px 28px;
-  font: 11.5px/1.5 var(--mono);
+.call-time {
+  margin-left: auto;
+  padding-left: 8px;
+  font: 11.5px var(--mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.call-head .chev {
+  flex: none;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: transform 0.12s, opacity 0.12s;
+}
+.call-head:hover .chev,
+.call-head .chev.open {
+  opacity: 1;
+}
+.call-head .chev.open {
+  transform: rotate(90deg);
+}
+.call-body {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  margin-top: 1px;
+}
+.call-elbow {
+  padding-left: 5px;
+  font: 12px/18px var(--mono);
   color: var(--text-faint);
 }
-.step-note.bad {
-  color: #e9938c;
-}
-.step-image {
-  display: block;
-  max-width: calc(100% - 28px);
-  margin: 4px 0 4px 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.step-detail {
+.call-content {
   display: grid;
   gap: 4px;
-  margin: 2px 0 6px 28px;
+  min-width: 0;
+  font: 12px/18px var(--mono);
+  color: var(--text-dim);
 }
-.step-detail pre {
-  max-height: 240px;
+.call-lines > div,
+.call-stream > div,
+.call-todos > div,
+.call-diff > div {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.call-lines.bad {
+  color: #f0a8a2;
+}
+.call-more {
+  color: var(--text-faint);
+}
+.call-progress {
+  color: var(--text-dim);
+}
+.call-cmd {
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.call-stream {
+  max-height: 200px;
+  overflow: hidden;
+  padding: 3px 10px;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 4px 4px 0;
+  background: #0d0d0f;
+  color: var(--text-dim);
+}
+.call-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.18em;
+  background: var(--text);
+  animation: blink 1s steps(2) infinite;
+}
+.call-diff {
+  overflow: hidden;
+  border-radius: 4px;
+}
+.call-diff > div {
+  padding: 0 8px 0 0;
+}
+.call-diff span {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  opacity: 0.75;
+}
+.call-diff .del {
+  background: rgba(240, 96, 90, 0.1);
+  color: #f3b4ae;
+}
+.call-diff .add {
+  background: rgba(92, 197, 140, 0.1);
+  color: #b5e8cb;
+}
+.call-todos .box {
+  margin-right: 6px;
+}
+.call-todos .completed {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+.call-todos .in_progress {
+  color: var(--text);
+}
+.call-detail {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+.call-detail pre {
+  max-height: 280px;
   margin: 0;
   padding: 8px 10px;
   overflow: auto;
@@ -921,12 +1018,46 @@ button.chat-title:focus-visible svg {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.step-image {
+  display: block;
+  max-width: 100%;
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 .tool-label {
   margin-top: 2px;
   font: 10.5px var(--mono);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-faint);
+}
+
+/* Thinking streams live, then folds away. */
+.thinking.live {
+  display: grid;
+  gap: 2px;
+}
+.thinking-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 12px/22px var(--mono);
+  color: var(--text-faint);
+}
+.thinking-live {
+  max-height: 9em;
+  overflow: hidden;
+  margin-left: 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-strong);
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%);
+  mask-image: linear-gradient(to bottom, transparent, #000 45%);
 }
 
 /* Asset result */

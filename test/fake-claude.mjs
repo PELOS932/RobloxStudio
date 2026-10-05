@@ -48,7 +48,9 @@ function streamText(text) {
   out({ type: "assistant", message: { id, content: [{ type: "text", text }] }, parent_tool_use_id: null });
 }
 
-async function toolCall(name, input) {
+// Like Claude Code: the tool_use is streamed first; beforeRun (e.g. the permission prompt)
+// happens while it is shown, then the tool runs and its result is reported.
+async function toolCall(name, input, beforeRun) {
   const id = `msg_${++apiCount}`;
   const toolId = `toolu_${apiCount}`;
   const json = JSON.stringify(input);
@@ -59,6 +61,10 @@ async function toolCall(name, input) {
   }
   out({ type: "stream_event", event: { type: "content_block_stop", index: 0 }, parent_tool_use_id: null });
   out({ type: "assistant", message: { id, content: [{ type: "tool_use", id: toolId, name: `mcp__forge__${name}`, input }] }, parent_tool_use_id: null });
+  if (beforeRun && !(await beforeRun())) {
+    out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolId, content: [{ type: "text", text: "The user declined this action." }], is_error: true }] }, parent_tool_use_id: null });
+    return null;
+  }
   const res = await client.callTool({ name, arguments: input });
   out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolId, content: res.content, is_error: !!res.isError }] }, parent_tool_use_id: null });
   return res;
@@ -111,10 +117,13 @@ for await (const line of createInterface({ input: process.stdin })) {
   } else if (/luau/i.test(prompt)) {
     const tool = "mcp__forge__studio_execute_luau";
     const input = { code: "return 1 + 1" };
-    const perm = await client.callTool({ name: "permission_prompt", arguments: { tool_name: tool, input } });
-    const decision = JSON.parse(perm.content[0].text);
-    if (decision.behavior === "allow") await toolCall("studio_execute_luau", decision.updatedInput);
-    streamText(decision.behavior === "allow" ? "Ran it." : "Skipped.");
+    let allowed = false;
+    await toolCall("studio_execute_luau", input, async () => {
+      const perm = await client.callTool({ name: "permission_prompt", arguments: { tool_name: tool, input } });
+      allowed = JSON.parse(perm.content[0].text).behavior === "allow";
+      return allowed;
+    });
+    streamText(allowed ? "Ran it." : "Skipped.");
   } else {
     streamText(`Echo: ${prompt}`);
   }

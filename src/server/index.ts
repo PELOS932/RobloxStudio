@@ -23,6 +23,8 @@ const bridge = new StudioBridge(getSettings);
 const htmlBridge = new HtmlBridge();
 const forge = new ForgeMcp({ bridge, getSettings, convertHtml: (r) => htmlBridge.convert(r) });
 const claude = new ClaudeManager({ getSettings, forge, port: PORT });
+// Forge tools report live progress lines onto the running tool call in the chat.
+forge.progressSink = (convId, toolName, text) => claude.toolProgress(convId, toolName, text);
 
 // ---------------------------------------------------------------------------
 // Security: this server can run code in Studio and drive Claude Code, so only

@@ -56,6 +56,14 @@ export type Block =
       inputPartial?: string;
       status: ToolStatus;
       result?: { text: string; images?: string[]; isError: boolean };
+      /** When Claude started writing the call, and when its result arrived (ms). */
+      startedAt?: number;
+      endedAt?: number;
+      /** Live status line reported by the tool while it runs (e.g. "Importing into Studio…"). */
+      progress?: string;
+      /** While the input streams: its full length and how many parts/nodes it has so far. */
+      inputChars?: number;
+      inputItems?: number;
     };
 
 export interface ChatMessage {

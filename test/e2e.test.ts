@@ -90,6 +90,9 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "Make me a lantern" }));
     const asset = await waitFor("asset", (e) => e.asset.kind === "model");
     modelId = asset.asset.id;
+    // While Studio runs the import, the call shows what is happening (updates are batched, so
+    // short-lived steps may be skipped; the import itself always lasts long enough to be seen).
+    await waitFor("message", (e) => e.convId === conv.id && e.message.blocks.some((b) => b.type === "tool" && /KB of generated Luau in Studio/.test(b.progress ?? "")));
     expect(asset.asset).toMatchObject({ name: "Lantern", size: 3 });
     await waitFor("status", (e) => e.convId === conv.id && e.status === "idle");
 
@@ -135,11 +138,16 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "run some luau" }));
     const perm = await waitFor("permission", (e) => e.request.convId === conv.id);
     expect(perm.request.toolName).toBe("mcp__forge__studio_execute_luau");
+    // The waiting call shows a live progress line in the chat (like Claude Code).
+    await waitFor("message", (e) => e.convId === conv.id && e.message.blocks.some((b) => b.type === "tool" && b.status === "running" && b.progress === "Waiting for your approval…"));
     ws.send(JSON.stringify({ type: "permission.respond", id: perm.request.id, allow: true }));
     await waitFor("status", (e) => e.convId === conv.id && e.status === "idle");
     const full = (await api(`/api/conversations/${conv.id}`)).body;
     const tool = full.messages.at(-1).blocks.find((b: { type: string }) => b.type === "tool");
     expect(tool.result.text.trim()).toBe("2");
+    expect(tool.startedAt).toBeTypeOf("number");
+    expect(tool.endedAt).toBeGreaterThanOrEqual(tool.startedAt);
+    expect(tool.progress).toBeUndefined();
   });
 
   it("queues follow-ups while a reply runs, and lets one be removed", async () => {

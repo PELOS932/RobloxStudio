@@ -30,11 +30,13 @@ export async function importAsset(
   settings: Settings,
   id: string,
   overrides: Partial<ImportOptions> = {},
+  onProgress?: (text: string) => void,
 ): Promise<ImportResult> {
   const asset = assets.get(id);
   if (!asset) return { ok: false, error: `No asset with id ${id}.` };
   const opts: ImportOptions = { ...settings.import, ...overrides };
   const { code, stats } = buildLuau(asset, opts);
+  onProgress?.(`Running ${(code.length / 1024).toFixed(1)} KB of generated Luau in Studio…`);
   try {
     const res = await bridge.runLuauJson<ImportResult>(code);
     if (res.ok) {
@@ -56,8 +58,9 @@ export interface PullResult {
 }
 
 /** Read the current Studio selection into a new asset. */
-export async function pullSelection(bridge: StudioBridge): Promise<PullResult> {
+export async function pullSelection(bridge: StudioBridge, onProgress?: (text: string) => void): Promise<PullResult> {
   try {
+    onProgress?.("Reading the Studio selection…");
     let head = await bridge.runLuauJson<{ total: number; chunk: string; error?: string }>(pullSelectionLuau());
     if (head.error) throw new StudioError(head.error);
     let json = head.chunk;
@@ -65,6 +68,7 @@ export async function pullSelection(bridge: StudioBridge): Promise<PullResult> {
       head = await bridge.runLuauJson(pullChunkLuau(json.length));
       if (head.error || !head.chunk) throw new StudioError(head.error ?? "Selection transfer was interrupted.");
       json += head.chunk;
+      onProgress?.(`Transferring the selection… ${Math.min(100, Math.round((json.length / head.total) * 100))}%`);
       if (json.length > 40 * PULL_CHUNK) throw new StudioError("Selection is too large to pull.");
     }
     const data = JSON.parse(json) as { kind: string; spec: unknown; skipped?: string[] | Record<string, never> };

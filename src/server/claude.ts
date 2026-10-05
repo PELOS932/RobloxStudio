@@ -103,10 +103,23 @@ class ClaudeSession {
     const send = () => {
       this.emitTimer = null;
       if (!this.turn) return;
-      // While a big tool input is still streaming, the UI only shows its tail.
+      // While a tool input streams, the UI gets its tail plus its size and item count
+      // (parts or UI nodes so far), so it can show live progress without the whole payload.
       const msg = this.turn.msg;
-      const message = msg.blocks.some((b) => b.type === "tool" && (b.inputPartial?.length ?? 0) > 4000)
-        ? { ...msg, blocks: msg.blocks.map((b) => (b.type === "tool" && b.inputPartial && b.inputPartial.length > 4000 ? { ...b, inputPartial: "…" + b.inputPartial.slice(-2000) } : b)) }
+      const message = msg.blocks.some((b) => b.type === "tool" && b.inputPartial)
+        ? {
+            ...msg,
+            blocks: msg.blocks.map((b) => {
+              if (b.type !== "tool" || !b.inputPartial) return b;
+              const p = b.inputPartial;
+              return {
+                ...b,
+                inputPartial: p.length > 4000 ? "…" + p.slice(-2000) : p,
+                inputChars: p.length,
+                inputItems: (p.match(/"(?:pos|type)"\s*:/g) ?? []).length,
+              };
+            }),
+          }
         : msg;
       bus.emitEvent({ type: "message", convId: this.convId, message });
     };
@@ -125,6 +138,19 @@ class ClaudeSession {
 
   private emitQueue() {
     bus.emitEvent({ type: "queue", convId: this.convId, items: this.queued });
+  }
+
+  /** Show a live status line on the newest running call of a tool. */
+  toolProgress(toolName: string, text: string) {
+    const blocks = this.turn?.msg.blocks ?? [];
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.type === "tool" && b.name === toolName && b.status === "running") {
+        b.progress = text;
+        this.emitMessage();
+        return;
+      }
+    }
   }
 
   unqueue(id: string) {
@@ -324,7 +350,7 @@ class ClaudeSession {
         if (cb.type === "text") block = { type: "text", text: cb.text ?? "" };
         else if (cb.type === "thinking") block = { type: "thinking", text: cb.thinking ?? "" };
         else if (cb.type === "tool_use" || cb.type === "server_tool_use" || cb.type === "mcp_tool_use") {
-          block = { type: "tool", id: cb.id, name: cb.name, input: cb.input ?? {}, inputPartial: "", status: "running" };
+          block = { type: "tool", id: cb.id, name: cb.name, input: cb.input ?? {}, inputPartial: "", status: "running", startedAt: Date.now() };
         }
         if (block) {
           blocks.push(block);
@@ -374,7 +400,7 @@ class ClaudeSession {
           existing.input = c.input ?? existing.input;
           delete existing.inputPartial;
         } else {
-          turn.msg.blocks.push({ type: "tool", id: c.id, name: c.name, input: c.input ?? {}, status: "running" });
+          turn.msg.blocks.push({ type: "tool", id: c.id, name: c.name, input: c.input ?? {}, status: "running", startedAt: Date.now() });
         }
       } else if (!streamed) {
         if (c.type === "text" && c.text) turn.msg.blocks.push({ type: "text", text: c.text });
@@ -399,6 +425,8 @@ class ClaudeSession {
       const isError = !!c.is_error;
       b.result = { text: text.slice(0, 50_000), images: images.length ? images : undefined, isError };
       b.status = isError ? (/declined|denied|permission/i.test(text) ? "denied" : "error") : "done";
+      b.endedAt = Date.now();
+      delete b.progress;
     }
     this.emitMessage();
   }
@@ -427,7 +455,12 @@ class ClaudeSession {
     } else if (!turn.msg.blocks.some((b) => b.type === "text") && typeof r.result === "string" && r.result.trim()) {
       turn.msg.blocks.push({ type: "text", text: r.result });
     }
-    for (const b of turn.msg.blocks) if (b.type === "tool" && b.status === "running") b.status = "done";
+    for (const b of turn.msg.blocks) {
+      if (b.type !== "tool" || b.status !== "running") continue;
+      b.status = "done";
+      b.endedAt ??= Date.now();
+      delete b.progress;
+    }
     this.emitMessage(true);
     this.turn = null;
     this.resumeRetried = false;
@@ -519,6 +552,10 @@ export class ClaudeManager {
 
   unqueue(convId: string, id: string) {
     this.sessions.get(convId)?.unqueue(id);
+  }
+
+  toolProgress(convId: string, toolName: string, text: string) {
+    this.sessions.get(convId)?.toolProgress(toolName, text);
   }
 
   running(): Record<string, ConvStatus> {

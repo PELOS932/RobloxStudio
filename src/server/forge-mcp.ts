@@ -37,6 +37,8 @@ interface ToolDef {
 
 interface Ctx {
   convId: string;
+  /** Live status line shown on this call in the chat. */
+  progress: (text: string) => void;
 }
 
 export interface ForgeDeps {
@@ -109,6 +111,8 @@ export class ForgeMcp {
   private alwaysAllow = new Set<string>();
   private tools: ToolDef[];
   private byName: Map<string, ToolDef>;
+  /** Set by the host: shows a progress line on a running tool call (by full tool name). */
+  progressSink?: (convId: string, toolName: string, text: string) => void;
   /** tools/list result, built once: the list is static (it is part of Claude's cached prompt). */
   private listed: { name: string; description: string; inputSchema: any }[];
 
@@ -163,7 +167,7 @@ export class ForgeMcp {
       res.status(405).set("Allow", "POST").json({ error: "method not allowed" });
       return;
     }
-    const ctx: Ctx = { convId: String(req.params.convId ?? "") };
+    const convId = String(req.params.convId ?? "");
     const server = new Server({ name: "forge", version: "0.1.0" }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: this.listed }));
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -171,6 +175,7 @@ export class ForgeMcp {
       if (!tool) return text(`Unknown tool ${request.params.name}`, true);
       const parsed = tool.schema.safeParse(request.params.arguments ?? {});
       if (!parsed.success) return text(`Invalid arguments: ${z.prettifyError(parsed.error)}`, true);
+      const ctx: Ctx = { convId, progress: (t) => this.progressSink?.(convId, `mcp__forge__${tool.name}`, t) };
       try {
         return await tool.run(parsed.data, ctx);
       } catch (err) {
@@ -188,12 +193,13 @@ export class ForgeMcp {
 
   // -------------------------------------------------------------------------
 
-  private async afterSave(asset: Asset, verb: string, warnings: string[] = []): Promise<ToolResult> {
+  private async afterSave(asset: Asset, verb: string, ctx: Ctx, warnings: string[] = []): Promise<ToolResult> {
     const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${dims(asset)}). Shown in the preview.`];
     if (warnings.length) lines.push(`Notes: ${warnings.slice(0, 8).join("; ")}`);
     const s = this.deps.getSettings();
     if (s.autoImport && this.deps.bridge.connected && this.deps.bridge.status.studioId) {
-      lines.push(importLine(await importAsset(this.deps.bridge, s, asset.id)));
+      ctx.progress(`Saved v${asset.version} (${sizeLabel(asset.kind, summarize(asset).size)}). Importing into Studio…`);
+      lines.push(importLine(await importAsset(this.deps.bridge, s, asset.id, {}, ctx.progress)));
     }
     return text(lines.join("\n"));
   }
@@ -238,9 +244,11 @@ export class ForgeMcp {
           "Create (or fully replace, with id) a 3D model made of Roblox parts. Prefer edit_model for changes. Save tokens with styles (shared color/material/size), repeat (rows of copies), copies (same part at offsets) and clones (copy a whole group).",
         schema: ModelSpecInputSchema.extend({ id: id.optional().describe("replace this existing model") }),
         advertise: (s) => looseItems(s, { styles: 'name → part fields to share (any part field except name/pos), e.g. {"log":{"color":"#6b4a2b","material":"Wood"}}' }),
-        run: async ({ id: replaceId, ...spec }) => {
-          const asset = this.save("model", sanitizeModelSpec(expandModelInput(spec)), replaceId);
-          return this.afterSave(asset, replaceId ? "Replaced" : "Created");
+        run: async ({ id: replaceId, ...spec }, ctx) => {
+          const model = sanitizeModelSpec(expandModelInput(spec));
+          ctx.progress(`Building ${model.parts.length} parts…`);
+          const asset = this.save("model", model, replaceId);
+          return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx);
         },
       },
       {
@@ -256,12 +264,12 @@ export class ForgeMcp {
           update: "partial updates matched by name: {name, ...any create_model part fields}; only listed fields change",
           styles: "styles for the added parts, as in create_model",
         }),
-        run: async ({ id: assetId, styles, add, ...edit }) => {
+        run: async ({ id: assetId, styles, add, ...edit }, ctx) => {
           const prev = assets.get(assetId);
           if (!prev || prev.kind !== "model") return text(`No model with id ${assetId}.`, true);
           const { spec, missing } = applyModelEdit(prev.spec, { ...edit, add: add ? expandParts(add, styles) : undefined });
           const asset = this.save("model", spec, assetId);
-          return this.afterSave(asset, "Edited", missing.length ? [`not found: ${missing.join(", ")}`] : []);
+          return this.afterSave(asset, "Edited", ctx, missing.length ? [`not found: ${missing.join(", ")}`] : []);
         },
       },
       {
@@ -269,10 +277,10 @@ export class ForgeMcp {
         description: "Create (or fully replace, with id) a ScreenGui from a flat list of Roblox GUI nodes. Prefer edit_ui for changes.",
         schema: UiSpecInputSchema.extend({ id: id.optional().describe("replace this existing UI") }),
         advertise: (s) => looseItems(s, { styles: 'name → node fields to share (any node field except name/parent), e.g. {"card":{"bg":"#1e2230","corner":12}}' }),
-        run: async ({ id: replaceId, ...raw }) => {
+        run: async ({ id: replaceId, ...raw }, ctx) => {
           const { spec, warnings } = sanitizeUiSpec(expandUiInput(raw));
           const asset = this.save("ui", spec, replaceId);
-          return this.afterSave(asset, replaceId ? "Replaced" : "Created", warnings);
+          return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx, warnings);
         },
       },
       {
@@ -284,13 +292,13 @@ export class ForgeMcp {
           update: "partial updates matched by name: {name, ...any create_ui node fields}; only listed fields change",
           styles: "styles for the added nodes, as in create_ui",
         }),
-        run: async ({ id: assetId, styles, add, ...edit }) => {
+        run: async ({ id: assetId, styles, add, ...edit }, ctx) => {
           const prev = assets.get(assetId);
           if (!prev || prev.kind !== "ui") return text(`No UI with id ${assetId}.`, true);
           const { spec, missing, warnings } = applyUiEdit(prev.spec, { ...edit, add: add ? expandUiNodes(add, styles) : undefined });
           if (prev.html) warnings.push("this UI came from HTML; edit_ui_html keeps the HTML source in sync (spec-only edits are lost if the HTML is re-translated)");
           const asset = this.save("ui", spec, assetId);
-          return this.afterSave(asset, "Edited", [...(missing.length ? [`not found: ${missing.join(", ")}`] : []), ...warnings]);
+          return this.afterSave(asset, "Edited", ctx, [...(missing.length ? [`not found: ${missing.join(", ")}`] : []), ...warnings]);
         },
       },
       {
@@ -305,11 +313,12 @@ export class ForgeMcp {
           autoScale: z.boolean().optional().describe("scale proportionally on other screens, default true"),
           id: id.optional().describe("replace this existing UI"),
         }),
-        run: async ({ name, html, width, height, autoScale, id: replaceId }) => {
+        run: async ({ name, html, width, height, autoScale, id: replaceId }, ctx) => {
           const source: HtmlSource = { source: html, width: width ?? 1280, height: height ?? 720, autoScale: autoScale ?? true };
+          ctx.progress(`Rendering the HTML at ${source.width}×${source.height} and translating it…`);
           const { spec, warnings } = await this.deps.convertHtml({ name, html, width: source.width, height: source.height, autoScale: source.autoScale });
           const asset = this.save("ui", spec, replaceId, source);
-          return this.afterSave(asset, replaceId ? "Replaced (from HTML)" : "Created (from HTML)", warnings);
+          return this.afterSave(asset, replaceId ? "Replaced (from HTML)" : "Created (from HTML)", ctx, warnings);
         },
       },
       {
@@ -324,7 +333,7 @@ export class ForgeMcp {
           width: z.number().int().min(320).max(3840).optional(),
           height: z.number().int().min(240).max(2160).optional(),
         }),
-        run: async ({ id: assetId, edits, width, height }) => {
+        run: async ({ id: assetId, edits, width, height }, ctx) => {
           const prev = assets.get(assetId);
           if (!prev || prev.kind !== "ui" || !prev.html) return text(`No HTML-based UI with id ${assetId} (use create_ui_html first).`, true);
           let source = prev.html.source;
@@ -335,16 +344,17 @@ export class ForgeMcp {
             source = e.all ? source.split(e.find).join(e.replace) : source.replace(e.find, () => e.replace);
           }
           const html: HtmlSource = { ...prev.html, source, width: width ?? prev.html.width, height: height ?? prev.html.height };
+          ctx.progress(`Applied ${edits.length} edit${edits.length > 1 ? "s" : ""}. Re-translating the HTML…`);
           const { spec, warnings } = await this.deps.convertHtml({ name: prev.spec.name, html: source, width: html.width, height: html.height, autoScale: html.autoScale });
           const asset = this.save("ui", spec, assetId, html);
-          return this.afterSave(asset, "Edited (from HTML)", warnings);
+          return this.afterSave(asset, "Edited (from HTML)", ctx, warnings);
         },
       },
       {
         name: "create_script",
         description: "Create (or replace, with id) a Script/LocalScript/ModuleScript that is inserted at a path in the place.",
         schema: ScriptSpecSchema.extend({ id: id.optional().describe("replace this existing script") }),
-        run: async ({ id: replaceId, ...spec }) => this.afterSave(this.save("script", spec, replaceId), replaceId ? "Replaced" : "Created"),
+        run: async ({ id: replaceId, ...spec }, ctx) => this.afterSave(this.save("script", spec, replaceId), replaceId ? "Replaced" : "Created", ctx),
       },
       {
         name: "list_assets",
@@ -375,8 +385,8 @@ export class ForgeMcp {
           placement: z.enum(["camera", "origin", "keep"]).optional().describe("models: in front of camera (default), at origin, or spec coordinates"),
           optimize: z.boolean().optional().describe("merge identical touching blocks (default true)"),
         }),
-        run: async ({ id: assetId, ...opts }) => {
-          const r = await importAsset(this.deps.bridge, this.deps.getSettings(), assetId, opts);
+        run: async ({ id: assetId, ...opts }, ctx) => {
+          const r = await importAsset(this.deps.bridge, this.deps.getSettings(), assetId, opts, ctx.progress);
           return text(importLine(r), !r.ok);
         },
       },
@@ -384,8 +394,8 @@ export class ForgeMcp {
         name: "studio_pull_selection",
         description: "Read the current Roblox Studio selection (Parts/Models or a ScreenGui/GUI objects) into a new editable asset.",
         schema: z.object({}),
-        run: async () => {
-          const r = await pullSelection(this.deps.bridge);
+        run: async (_args, ctx) => {
+          const r = await pullSelection(this.deps.bridge, ctx.progress);
           if (!r.ok || !r.asset) return text(r.error ?? "Pull failed.", true);
           const skipped = r.skipped?.length ? ` Skipped unsupported: ${r.skipped.slice(0, 10).join(", ")}${r.skipped.length > 10 ? "…" : ""}.` : "";
           return text(`Pulled ${r.asset.kind} "${r.asset.name}" as ${r.asset.id} (${sizeLabel(r.asset.kind, summarize(r.asset).size)}).${skipped} Use get_asset to read it.`);
@@ -398,7 +408,8 @@ export class ForgeMcp {
           code: z.string().describe("Luau; end with `return <compact value>` to get a result"),
           datamodel: z.enum(["Edit", "Client", "Server"]).optional().describe("default Edit; Client/Server only while play-testing"),
         }),
-        run: async ({ code, datamodel }) => {
+        run: async ({ code, datamodel }, ctx) => {
+          ctx.progress(`Running in Studio (${datamodel ?? "Edit"})…`);
           const out = await this.deps.bridge.runLuau(code, datamodel ?? "Edit");
           return text(clip(out || "nil"));
         },
@@ -508,6 +519,7 @@ export class ForgeMcp {
 
   private askUser(convId: string, toolName: string, input: unknown): Promise<boolean> {
     if (this.alwaysAllow.has(toolName)) return Promise.resolve(true);
+    this.progressSink?.(convId, toolName, "Waiting for your approval…");
     const request: PermissionRequest = { id: shortId("p_"), convId, toolName, input, createdAt: Date.now() };
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => this.resolvePermission(request.id, false), 15 * 60_000);
