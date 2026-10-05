@@ -170,7 +170,7 @@ The tests that execute generated Luau need [Lune](https://lune-org.github.io/doc
 
 ## Status and limitations
 
-- Not yet tested against a live Roblox Studio. Conversions are verified with Lune (Roblox's reflection database). The Studio MCP integration follows the tool schemas of Studio's built-in server and was exercised against the mock server. Please report anything that behaves differently in real Studio.
+- Not yet tested against a live Roblox Studio. Conversions are verified with Lune (Roblox's reflection database): 3D models are imported part by part and checked against Roblox's own `CFrame.Angles` math (every shape, cylinder axis, rotation, material, light and group), then pulled back and re-imported to the same parts. The Studio MCP integration follows the tool schemas of Studio's built-in server and was exercised against the mock server. Please report anything that behaves differently in real Studio.
 - The UI preview uses Roblox's layout rules exactly. Roblox's own fonts (Gotham, Builder Sans) are proprietary, so the preview approximates them with Montserrat and Inter. Text widths can differ slightly, and HTML text is mapped to the closest Roblox font (Inter → Builder Sans, Montserrat → Gotham, and so on).
 - HTML translation is a faithful snapshot of the rendered page, not a live layout. Lists built from HTML use absolute positions, not `UIListLayout`. Layered frames only approximate soft shadows.
 - Image previews load `rbxassetid://` thumbnails through Roblox's public thumbnail API. Unknown ids show a placeholder.
