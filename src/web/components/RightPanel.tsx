@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  deleteAsset, importAsset, insertIntoComposer, loadAsset, openAsset, restoreAssetVersion, setRightTab, toast, useStore,
+  importAsset, insertIntoComposer, loadAsset, restoreAssetVersion, setRightTab, toast, useStore,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
 import { Icon, KindIcon } from "../lib/icons.tsx";
@@ -12,7 +12,7 @@ import { ScriptView } from "./ScriptView.tsx";
 import { StudioPanel } from "./StudioPanel.tsx";
 import { PlacePanel } from "./PlacePanel.tsx";
 import { HtmlSourceView, retranslate } from "./HtmlTools.tsx";
-import { AssetThumb } from "./AssetThumb.tsx";
+import { Library, timeAgo } from "./Library.tsx";
 
 export function RightPanel() {
   const tab = useStore((s) => s.rightTab);
@@ -25,7 +25,7 @@ export function RightPanel() {
           <Icon name="eye" /> Preview
         </button>
         <button className={`tab ${tab === "assets" ? "active" : ""}`} onClick={() => setRightTab("assets")}>
-          <Icon name="grid" /> Assets <span className="count">{assets.length}</span>
+          <Icon name="grid" /> Library <span className="count">{assets.length}</span>
         </button>
         <button className={`tab ${tab === "place" ? "active" : ""}`} onClick={() => setRightTab("place")} title="Browse the open Studio place: Explorer, map, UIs and scripts">
           <Icon name="map" /> Place
@@ -36,7 +36,7 @@ export function RightPanel() {
       </div>
       <div className="panel-body">
         {tab === "preview" && <PreviewPane />}
-        {tab === "assets" && <AssetLibrary />}
+        {tab === "assets" && <Library />}
         {tab === "place" && <PlacePanel />}
         {tab === "studio" && <StudioPanel />}
       </div>
@@ -231,98 +231,4 @@ function VersionMenu({ asset }: { asset: AssetSummary }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-
-function AssetLibrary() {
-  const assets = useStore((s) => s.assets);
-  const activeId = useStore((s) => s.activeAssetId);
-  const [filter, setFilter] = useState<"all" | "model" | "ui" | "script">("all");
-  const [q, setQ] = useState("");
-  const [pasteOpen, setPasteOpen] = useState(false);
-  const list = useMemo(
-    () => assets.filter((a) => (filter === "all" || a.kind === filter) && a.name.toLowerCase().includes(q.toLowerCase())),
-    [assets, filter, q],
-  );
-  return (
-    <>
-      <div className="library-tools">
-        <input className="search" placeholder="Search assets" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="seg" style={{ background: "var(--panel-2)" }}>
-          {(["all", "model", "ui", "script"] as const).map((f) => (
-            <button key={f} className={filter === f ? "active" : ""} onClick={() => setFilter(f)}>
-              {f === "all" ? "All" : f === "model" ? "Models" : f === "ui" ? "UI" : "Scripts"}
-            </button>
-          ))}
-        </div>
-        <button className="btn" onClick={() => useStore.setState({ htmlImportOpen: true })} title="Translate HTML/CSS into a Roblox UI">
-          <Icon name="code" /> HTML
-        </button>
-        <button className="btn" onClick={() => setPasteOpen((v) => !v)} title="Add an asset from JSON">
-          <Icon name="plus" /> JSON
-        </button>
-      </div>
-      {pasteOpen && <PasteJson onDone={() => setPasteOpen(false)} />}
-      <div className="library">
-        {list.length === 0 && <div className="muted" style={{ padding: 16, textAlign: "center" }}>No assets{q ? " match" : " yet"}.</div>}
-        {list.map((a) => (
-          <div key={a.id} className={`asset-row ${a.id === activeId ? "active" : ""}`} onClick={() => openAsset(a.id)}>
-            <AssetThumb id={a.id} kind={a.kind} version={a.version} width={72} height={45} />
-            <div className="meta">
-              <b>{a.name}</b>
-              <small>
-                {a.kind === "model" ? "model" : a.kind === "ui" ? "ui" : "script"} · {sizeLabel(a.kind, a.size)} · v{a.version} · {timeAgo(a.updatedAt)}
-              </small>
-            </div>
-            {a.fromHtml && <span className="badge">HTML</span>}
-            {a.lastImport && <span className={`badge ${a.lastImport.version === a.version ? "ok" : ""}`}>{a.lastImport.version === a.version ? "In Studio" : "Studio outdated"}</span>}
-            <button
-              className="icon-btn"
-              title="Delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm(`Delete "${a.name}"? This only removes it from Studio Forge.`)) void deleteAsset(a.id);
-              }}
-            >
-              <Icon name="trash" />
-            </button>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function PasteJson({ onDone }: { onDone: () => void }) {
-  const [text, setText] = useState("");
-  const submit = async () => {
-    try {
-      const parsed = JSON.parse(text);
-      const kind = parsed.kind ?? (parsed.parts ? "model" : parsed.nodes ? "ui" : parsed.source ? "script" : undefined);
-      const spec = parsed.spec ?? parsed;
-      const asset = await api<Asset>("/assets", { body: { kind, spec } });
-      openAsset(asset.id);
-      onDone();
-    } catch (err) {
-      toast(`Could not add asset: ${err instanceof Error ? err.message : err}`, "error");
-    }
-  };
-  return (
-    <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", display: "grid", gap: 8 }}>
-      <textarea className="console-input" placeholder='Paste a Studio Forge JSON export ({"kind":"model","spec":{...}})' value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="row" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button className="btn ghost" onClick={onDone}>Cancel</button>
-        <button className="btn primary" onClick={submit} disabled={!text.trim()}>Add asset</button>
-      </div>
-    </div>
-  );
-}
-
-export function timeAgo(t: number): string {
-  const s = Math.max(1, Math.round((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return new Date(t).toLocaleDateString();
-}
+export { timeAgo };

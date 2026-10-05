@@ -52,6 +52,7 @@ function Palette() {
 
   const conversations = useStore((s) => s.conversations);
   const assets = useStore((s) => s.assets);
+  const games = useStore((s) => s.games);
   const activeAsset = useStore((s) => s.assets.find((a) => a.id === s.activeAssetId));
   const activeConvId = useStore((s) => s.activeConvId);
   const running = useStore((s) => (s.activeConvId ? !!s.running[s.activeConvId] : false));
@@ -91,7 +92,10 @@ function Palette() {
     }
     act("html", "Translate HTML to a Roblox UI", "code", () => useStore.setState({ htmlImportOpen: true }), undefined, "import paste convert");
     act("tab-preview", "Show the preview", "eye", () => useStore.setState({ rightTab: "preview", mobileView: "panel" }));
-    act("tab-assets", "Show all assets", "grid", () => useStore.setState({ rightTab: "assets", mobileView: "panel" }), undefined, "library");
+    act("tab-assets", "Open the library", "grid", () => useStore.setState({ rightTab: "assets", mobileView: "panel" }), undefined, "assets models saved");
+    for (const g of games) {
+      act(`game-${g.id}`, `Library: ${g.name}`, "map", () => useStore.setState({ rightTab: "assets", mobileView: "panel", libraryGame: g.id }), undefined, "game place assets models");
+    }
     act("tab-place", "Browse the Studio place", "map", () => useStore.setState({ rightTab: "place", mobileView: "panel" }), undefined, "explorer workspace tree scripts gui");
     if (studioReady) {
       act("place-map", "View the whole map in 3D", "map", () => {
@@ -120,12 +124,13 @@ function Palette() {
     for (const a of assets) {
       out.push({
         id: `asset-${a.id}`, group: "Assets", label: a.name, kind: a.kind,
-        hint: `${a.kind} · ${sizeLabel(a.kind, a.size)} · v${a.version}`, keywords: a.id,
+        hint: `${a.kind} · ${sizeLabel(a.kind, a.size)}${a.gameId ? ` · ${games.find((g) => g.id === a.gameId)?.name ?? ""}` : ""}`,
+        keywords: `${a.id} ${games.find((g) => g.id === a.gameId)?.name ?? ""} ${a.description ?? ""}`,
         run: () => openAsset(a.id),
       });
     }
     return out;
-  }, [conversations, assets, activeAsset, activeConvId, running, studio, settings, sidebarOpen]);
+  }, [conversations, assets, games, activeAsset, activeConvId, running, studio, settings, sidebarOpen]);
 
   const results = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api, socket } from "./lib/api.ts";
 import type {
-  Asset, AssetSummary, ChatMessage, ClaudeStatus, Conversation, ConversationMeta, ConvStatus,
+  Asset, AssetSummary, ChatMessage, ClaudeStatus, Conversation, ConversationMeta, ConvStatus, Game,
   HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
@@ -29,6 +29,11 @@ interface State {
   placeProgress: string | null;
   /** `claude update` is running. */
   claudeUpdating: boolean;
+  games: Game[];
+  /** The game open in Studio right now. */
+  currentGameId?: string;
+  /** Library filter: "open" (the game open in Studio), "all", "none" (unfiled) or a game id. */
+  libraryGame: string;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -64,6 +69,8 @@ export const useStore = create<State>(() => ({
   limits: null,
   placeProgress: null,
   claudeUpdating: false,
+  games: [],
+  libraryGame: "open",
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -119,6 +126,8 @@ function onEvent(e: ServerEvent) {
         queues: s.queues ?? {},
         limits: s.limits ?? null,
         permissions: s.permissions,
+        games: s.games ?? [],
+        currentGameId: s.currentGameId,
         activeAssetId: st.activeAssetId ?? s.assets[0]?.id ?? null,
       }));
       const active = get().activeConvId;
@@ -168,6 +177,9 @@ function onEvent(e: ServerEvent) {
       break;
     case "limits":
       set({ limits: e.limits });
+      break;
+    case "games":
+      set({ games: e.games, currentGameId: e.currentGameId });
       break;
     case "place.progress":
       set({ placeProgress: e.text });
@@ -335,6 +347,32 @@ export async function importAsset(id: string, overrides: Record<string, unknown>
   } finally {
     set((s) => ({ importing: { ...s.importing, [id]: false } }));
   }
+}
+
+/** File an asset under a game (null = no game) and/or rename it. */
+export async function updateAssetMeta(id: string, patch: { gameId?: string | null; name?: string }) {
+  try {
+    await api(`/assets/${id}`, { method: "PATCH", body: patch });
+  } catch (err) {
+    toast(String(err), "error");
+  }
+}
+
+export async function createGame(name: string): Promise<Game | null> {
+  try {
+    return await api<Game>("/games", { body: { name } });
+  } catch (err) {
+    toast(String(err), "error");
+    return null;
+  }
+}
+
+export async function renameGame(id: string, name: string) {
+  await api(`/games/${id}`, { method: "PATCH", body: { name } }).catch((err) => toast(String(err), "error"));
+}
+
+export async function deleteGame(id: string) {
+  await api(`/games/${id}`, { method: "DELETE" }).catch((err) => toast(String(err), "error"));
 }
 
 export async function deleteAsset(id: string) {

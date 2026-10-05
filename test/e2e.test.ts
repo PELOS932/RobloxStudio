@@ -133,6 +133,40 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(JSON.parse(await (await fetch(`${BASE}/api/assets/${modelId}/export?format=json`)).text()).kind).toBe("model");
   });
 
+  it("files assets under the game open in Studio and lets them move between games", async () => {
+    const post = (path: string, body: unknown, method = "POST") => api(path, { method, body: JSON.stringify(body) });
+    const state = (await api("/api/state")).body;
+    const mock = state.games.find((g: { name: string }) => g.name === "MockPlace");
+    expect(mock).toBeTruthy();
+    expect(state.currentGameId).toBe(mock.id);
+    // The lantern Claude built earlier was filed under the open game.
+    expect(state.assets.find((a: { id: string }) => a.id === modelId).gameId).toBe(mock.id);
+
+    const other = (await post("/api/games", { name: "Obby World" })).body;
+    await waitFor("games", (e) => e.games.some((g) => g.id === other.id));
+    const moved = (await post(`/api/assets/${modelId}`, { gameId: other.id }, "PATCH")).body;
+    expect(moved).toMatchObject({ id: modelId, gameId: other.id });
+    expect((await post(`/api/assets/${modelId}`, { gameId: "g_nope" }, "PATCH")).status).toBe(404);
+
+    // A model saved by the user goes to the open game unless told otherwise.
+    const saved = (await post("/api/assets", { kind: "model", spec: { name: "Crate", parts: [{ size: [2, 2, 2], pos: [0, 1, 0] }] } })).body;
+    expect(saved.gameId).toBe(mock.id);
+    const loose = (await post("/api/assets", { kind: "model", gameId: null, spec: { name: "Loose", parts: [{ size: [1, 1, 1], pos: [0, 0.5, 0] }] } })).body;
+    expect(loose.gameId).toBeUndefined();
+
+    // Deleting a game keeps its assets, unfiled.
+    await post(`/api/games/${other.id}`, {}, "DELETE");
+    await waitFor("asset", (e) => e.asset.id === modelId && !e.asset.gameId);
+
+    // Previews rendered by the browser are cached per version.
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    expect((await post(`/api/assets/${saved.id}/thumb`, { version: saved.version + 1, dataUrl: png }, "PUT")).body).toEqual({ ok: false });
+    expect((await post(`/api/assets/${saved.id}/thumb`, { version: saved.version, dataUrl: png }, "PUT")).body).toEqual({ ok: true });
+    const thumb = await fetch(`${BASE}/api/assets/${saved.id}/thumb`);
+    expect(thumb.headers.get("content-type")).toMatch(/png/);
+    expect((await api("/api/state")).body.assets.find((a: { id: string }) => a.id === saved.id).thumb).toBe(saved.version);
+  });
+
   it("browses the open place: Explorer, map, scripts and selection", async () => {
     const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
     const top = (await post("/api/place/children", { path: [] })).body;

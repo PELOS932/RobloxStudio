@@ -1,7 +1,7 @@
 // Asset ⇄ Studio: deterministic conversion + execution through the Studio bridge.
 // No model tokens are spent on conversion or import.
 
-import { assets, shortId } from "./store.ts";
+import { assets, games, shortId } from "./store.ts";
 import { StudioError, type StudioBridge } from "./studio-bridge.ts";
 import { modelToLuau, scriptToLuau, uiToLuau, type ImportOptions } from "../shared/to-luau.ts";
 import { modelToRbxmx, scriptToRbxmx, uiToRbxmx } from "../shared/to-rbxmx.ts";
@@ -41,6 +41,8 @@ export async function importAsset(
     const res = await bridge.runLuauJson<ImportResult>(code);
     if (res.ok) {
       asset.lastImport = { at: Date.now(), path: res.path ?? "", version: asset.version };
+      // An unfiled asset belongs to the game it was first imported into.
+      if (!asset.gameId && games.currentId) asset.gameId = games.currentId;
       assets.put(asset, false);
       if (stats && stats.after !== stats.before) res.optimizedFrom = stats.before;
     }
@@ -83,6 +85,7 @@ export async function pullSelection(bridge: StudioBridge, onProgress?: (text: st
       const { spec } = sanitizeUiSpec(UiSpecSchema.parse(data.spec));
       asset = { id: shortId("u_"), kind: "ui", name: spec.name, spec, createdAt: now, updatedAt: now, version: 1, origin: "studio" };
     }
+    if (games.currentId) asset.gameId = games.currentId;
     assets.put(asset, true);
     return { ok: true, asset, skipped };
   } catch (err) {

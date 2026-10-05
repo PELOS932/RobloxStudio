@@ -139,6 +139,16 @@ export interface PlanUsage {
   updatedAt: number;
 }
 
+/** A game (Studio place) the library is organized by. */
+export interface Game {
+  id: string;
+  name: string;
+  /** Roblox PlaceId once the place is published. */
+  placeId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface BootState {
   settings: Settings;
   conversations: ConversationMeta[];
@@ -151,6 +161,9 @@ export interface BootState {
   permissions: PermissionRequest[];
   /** Latest subscription usage (null until Claude Code has reported it). */
   limits: PlanUsage | null;
+  games: Game[];
+  /** The game open in Studio right now, if any. */
+  currentGameId?: string;
 }
 
 export interface QueuedMessage {
@@ -176,6 +189,7 @@ export type ServerEvent =
   | { type: "queue"; convId: string; items: QueuedMessage[] }
   | { type: "limits"; limits: PlanUsage }
   | { type: "place.progress"; text: string | null }
+  | { type: "games"; games: Game[]; currentGameId?: string }
   | { type: "asset"; asset: AssetSummary; focus?: boolean }
   | { type: "asset.deleted"; id: string }
   | { type: "studio"; status: StudioStatus }

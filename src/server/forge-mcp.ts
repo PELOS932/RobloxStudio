@@ -7,7 +7,7 @@ import type { Request, Response } from "express";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { assets, bus, shortId } from "./store.ts";
+import { assets, bus, games, shortId } from "./store.ts";
 import { importAsset, pullSelection } from "./importer.ts";
 import { resultText, type StudioBridge, type ToolCallResult } from "./studio-bridge.ts";
 import { MCP_TOKEN } from "./config.ts";
@@ -219,7 +219,10 @@ export class ForgeMcp {
       version: (prev?.version ?? 0) + 1,
       origin: "claude",
       lastImport: prev?.lastImport,
+      // Filed under the game open in Studio (replacements stay where they are).
+      gameId: prev ? prev.gameId : games.currentId,
     } as Asset;
+    if (!asset.gameId) delete asset.gameId;
     if (asset.kind === "ui") {
       const keep = html === undefined && prev?.kind === "ui" ? prev.html : html ?? undefined;
       if (keep) asset.html = keep;
@@ -358,12 +361,28 @@ export class ForgeMcp {
       },
       {
         name: "list_assets",
-        description: "List assets in the library (id, kind, name, size, version, last Studio import).",
-        schema: z.object({}),
-        run: async () => {
-          const list = assets.list();
-          if (!list.length) return text("No assets yet.");
-          return text(list.slice(0, 60).map((a) => `${a.id} ${a.kind} "${a.name}" v${a.version} ${sizeLabel(a.kind, a.size)}${a.lastImport ? ` → ${a.lastImport.path}` : ""}`).join("\n"));
+        description: "List library assets (id, kind, name, size, version, Studio path). Shows the game open in Studio plus unfiled assets unless all is true.",
+        schema: z.object({
+          all: z.boolean().optional().describe("every game"),
+          query: z.string().optional().describe("filter by name"),
+        }),
+        run: async ({ all, query }) => {
+          const current = games.get(games.currentId);
+          const everything = assets.list();
+          let list = all || !current ? everything : everything.filter((a) => !a.gameId || a.gameId === current.id);
+          if (query) {
+            const q = query.toLowerCase();
+            list = list.filter((a) => a.name.toLowerCase().includes(q) || a.description?.toLowerCase().includes(q));
+          }
+          const hidden = everything.length - (all || !current ? everything.length : everything.filter((a) => !a.gameId || a.gameId === current.id).length);
+          const head = current && !all ? `Game "${current.name}"${hidden ? ` (${hidden} more in other games: all: true)` : ""}` : "";
+          if (!list.length) return text([head, query ? `No assets match "${query}".` : "No assets yet."].filter(Boolean).join("\n"));
+          const line = (a: (typeof list)[number]) => {
+            const game = all && a.gameId ? ` [${games.get(a.gameId)?.name ?? "?"}]` : "";
+            return `${a.id} ${a.kind} "${a.name}" v${a.version} ${sizeLabel(a.kind, a.size)}${a.lastImport ? ` → ${a.lastImport.path}` : ""}${game}`;
+          };
+          const more = list.length > 60 ? `\n…${list.length - 60} more (use query)` : "";
+          return text([head, ...list.slice(0, 60).map(line)].filter(Boolean).join("\n") + more);
         },
       },
       {

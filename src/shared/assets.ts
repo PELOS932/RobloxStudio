@@ -14,6 +14,8 @@ interface AssetBase {
   origin: "claude" | "studio" | "user";
   /** Last successful Studio import, if any. */
   lastImport?: { at: number; path: string; version: number };
+  /** The game (Studio place) this asset is filed under in the library. */
+  gameId?: string;
 }
 
 /** Original HTML a UI was translated from (kept so it can be edited and re-translated). */
@@ -38,11 +40,18 @@ export interface AssetSummary {
   size: number;
   lastImport?: Asset["lastImport"];
   fromHtml?: boolean;
+  gameId?: string;
+  description?: string;
+  /** Version of the cached preview image (GET /api/assets/:id/thumb), if one is stored. */
+  thumb?: number;
 }
 
 export function summarize(a: Asset): AssetSummary {
   const size = a.kind === "model" ? a.spec.parts.length : a.kind === "ui" ? a.spec.nodes.length : a.spec.source.split("\n").length;
-  return { id: a.id, kind: a.kind, name: a.name, version: a.version, updatedAt: a.updatedAt, size, lastImport: a.lastImport, fromHtml: a.kind === "ui" && !!a.html };
+  return {
+    id: a.id, kind: a.kind, name: a.name, version: a.version, updatedAt: a.updatedAt, size, lastImport: a.lastImport,
+    fromHtml: a.kind === "ui" && !!a.html, gameId: a.gameId, description: a.description,
+  };
 }
 
 export function sizeLabel(kind: AssetKind, size: number): string {

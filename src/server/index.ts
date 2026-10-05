@@ -4,7 +4,7 @@ import { join } from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 import { HOST, PORT, ROOT, loadSettings, saveSettings } from "./config.ts";
-import { assets, bus, conversations, shortId } from "./store.ts";
+import { assets, bus, conversations, games, shortId } from "./store.ts";
 import { StudioBridge } from "./studio-bridge.ts";
 import { ForgeMcp } from "./forge-mcp.ts";
 import { ClaudeManager } from "./claude.ts";
@@ -15,7 +15,7 @@ import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
 import type { Asset } from "../shared/assets.ts";
-import type { BootState, ClientEvent, ServerEvent, Settings } from "../shared/protocol.ts";
+import type { BootState, ClientEvent, ServerEvent, Settings, StudioStatus } from "../shared/protocol.ts";
 
 let settings: Settings = loadSettings();
 const getSettings = () => settings;
@@ -88,6 +88,8 @@ function bootState(): BootState {
     queues: claude.queues(),
     limits: claude.limits,
     permissions: forge.pendingPermissions,
+    games: games.list(),
+    currentGameId: games.currentId,
   };
 }
 
@@ -121,7 +123,7 @@ api.delete("/assets/:id", (req, res) => res.json({ ok: assets.delete(String(req.
 
 /** Create an asset from pasted JSON (lets users bring their own specs). */
 api.post("/assets", (req, res) => {
-  const { kind, spec, html, replaceId } = req.body ?? {};
+  const { kind, spec, html, replaceId, gameId } = req.body ?? {};
   const now = Date.now();
   const prev = replaceId ? assets.get(String(replaceId)) : undefined;
   if (replaceId && (!prev || prev.kind !== kind)) return void res.status(404).json({ error: "asset to replace not found" });
@@ -131,7 +133,10 @@ api.post("/assets", (req, res) => {
     version: (prev?.version ?? 0) + 1,
     origin: prev?.origin ?? ("user" as const),
     lastImport: prev?.lastImport,
+    // New assets are filed under the game open in Studio unless the request names one (null = none).
+    gameId: prev ? prev.gameId : gameId === null ? undefined : games.get(gameId)?.id ?? games.currentId,
   };
+  if (!base.gameId) delete base.gameId;
   let asset: Asset;
   if (kind === "model") {
     const s = sanitizeModelSpec(ModelSpecSchema.parse(spec));
@@ -158,9 +163,49 @@ api.post("/assets/:id/restore", (req, res) => {
   const old = assets.version(id, Number(req.body?.version));
   if (!current || !old) return void res.status(404).json({ error: "version not found" });
   if (old.version === current.version) return void res.json(current);
-  const restored = { ...old, version: current.version + 1, updatedAt: Date.now(), createdAt: current.createdAt, lastImport: current.lastImport } as Asset;
+  const restored = { ...old, version: current.version + 1, updatedAt: Date.now(), createdAt: current.createdAt, lastImport: current.lastImport, gameId: current.gameId } as Asset;
+  if (!restored.gameId) delete restored.gameId;
   res.json(assets.put(restored, true));
 });
+
+/** Move an asset to another game (gameId null = none) and/or rename it (a new version). */
+api.patch("/assets/:id", (req, res) => {
+  const id = String(req.params.id);
+  let a = assets.get(id);
+  if (!a) return void res.status(404).json({ error: "not found" });
+  const { gameId, name } = req.body ?? {};
+  if (gameId !== undefined) {
+    if (gameId !== null && !games.get(String(gameId))) return void res.status(404).json({ error: "game not found" });
+    a = assets.setGame(id, gameId === null ? undefined : String(gameId))!;
+  }
+  if (typeof name === "string" && name.trim() && name.trim() !== a.name) {
+    const clean = name.trim().slice(0, 60);
+    a = assets.put({ ...a, name: clean, spec: { ...a.spec, name: clean }, version: a.version + 1, updatedAt: Date.now() } as Asset, false);
+  }
+  res.json(assets.summary(a));
+});
+
+// Preview images rendered by the browser, cached so the library never has to load every spec.
+api.get("/assets/:id/thumb", (req, res) => {
+  const file = assets.thumbFile(String(req.params.id));
+  if (!file) return void res.status(404).end();
+  res.set("Cache-Control", "private, max-age=31536000, immutable").type("png").sendFile(file);
+});
+api.put("/assets/:id/thumb", (req, res) => {
+  const m = String(req.body?.dataUrl ?? "").match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+  if (!m || m[1].length > 2_000_000) return void res.status(400).json({ error: "expected a PNG data URL" });
+  res.json({ ok: assets.putThumb(String(req.params.id), Number(req.body?.version), Buffer.from(m[1], "base64")) });
+});
+
+// Games ---------------------------------------------------------------------
+api.get("/games", (_req, res) => res.json({ games: games.list(), currentGameId: games.currentId }));
+api.post("/games", (req, res) => res.json(games.create(String(req.body?.name ?? ""))));
+api.patch("/games/:id", (req, res) => {
+  const g = games.rename(String(req.params.id), String(req.body?.name ?? ""));
+  if (!g) return void res.status(404).json({ error: "not found" });
+  res.json(g);
+});
+api.delete("/games/:id", (req, res) => res.json({ ok: games.delete(String(req.params.id)) }));
 
 api.post("/assets/:id/import", wrap(async (req, res) => {
   res.json(await importAsset(bridge, settings, String(req.params.id), req.body ?? {}));
@@ -352,6 +397,33 @@ wss.on("connection", (ws) => {
 function send(ws: WebSocket, e: ServerEvent) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(e));
 }
+// The game open in Studio: new assets are filed under it, and the library opens on it.
+async function syncGame(status: StudioStatus) {
+  if (status.state !== "connected" || !status.studioId) return games.setCurrent(undefined);
+  let place: { name: string; placeId?: string } | undefined;
+  if (status.flavor === "legacy") {
+    // The legacy plugin has no place list; ask Studio.
+    const info = await bridge
+      .runLuauJson<{ name?: string; placeId?: number }>('return game:GetService("HttpService"):JSONEncode({ name = game.Name, placeId = game.PlaceId })')
+      .catch(() => null);
+    if (info?.name) place = { name: info.name, placeId: info.placeId ? String(info.placeId) : undefined };
+  } else {
+    const window = status.studios.find((x) => x.id === status.studioId)?.name ?? "";
+    const m = window.match(/^(.*?)\s*\(placeId:\s*(\d+)\)\s*$/);
+    const name = (m ? m[1] : window).trim();
+    if (name) place = { name, placeId: m && m[2] !== "0" ? m[2] : undefined };
+  }
+  games.setCurrent(place ? games.forPlace(place.name, place.placeId).id : undefined);
+}
+let lastPlace = "";
+bus.on("event", (e: ServerEvent) => {
+  if (e.type !== "studio") return;
+  const key = `${e.status.state}|${e.status.studioId}|${e.status.studios.find((x) => x.id === e.status.studioId)?.name ?? ""}`;
+  if (key === lastPlace) return;
+  lastPlace = key;
+  void syncGame(e.status);
+});
+
 bus.on("event", (e: ServerEvent) => {
   const data = JSON.stringify(e);
   for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(data);

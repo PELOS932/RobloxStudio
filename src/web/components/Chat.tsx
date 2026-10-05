@@ -684,7 +684,7 @@ function AssetCard({ id }: { id: string }) {
   return (
     <div className={`asset-card ${active ? "active" : ""}`}>
       <button className="asset-thumb" onClick={() => openAsset(id)} title="Open in the preview">
-        <AssetThumb id={id} kind={asset.kind} version={asset.version} width={112} height={70} />
+        <AssetThumb id={id} kind={asset.kind} version={asset.version} width={112} height={70} thumb={asset.thumb} />
       </button>
       <div className="asset-info">
         <button className="asset-name" onClick={() => openAsset(id)}>{asset.name}</button>
