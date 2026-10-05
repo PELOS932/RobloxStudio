@@ -10,6 +10,7 @@ import { ForgeMcp } from "./forge-mcp.ts";
 import { ClaudeManager } from "./claude.ts";
 import { HtmlBridge } from "./html-bridge.ts";
 import { buildLuau, buildRbxmx, importAsset, pullSelection } from "./importer.ts";
+import { parsePath, PlaceReader } from "./place.ts";
 import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
@@ -20,6 +21,7 @@ let settings: Settings = loadSettings();
 const getSettings = () => settings;
 
 const bridge = new StudioBridge(getSettings);
+const place = new PlaceReader(bridge);
 const htmlBridge = new HtmlBridge();
 const forge = new ForgeMcp({ bridge, getSettings, convertHtml: (r) => htmlBridge.convert(r) });
 const claude = new ClaudeManager({ getSettings, forge, port: PORT });
@@ -233,6 +235,19 @@ api.post("/studio/pull", wrap(async (_req, res) => {
   const r = await pullSelection(bridge);
   res.json({ ok: r.ok, error: r.error, skipped: r.skipped, id: r.asset?.id });
 }));
+// Place browser (read-only views of the open place) ---------------------------
+const placeRoute = (fn: (body: any) => Promise<unknown>) => (req: Request, res: Response) => {
+  fn(req.body ?? {})
+    .then((out) => res.json(out))
+    .catch((err) => res.status(400).json({ error: err instanceof Error ? err.message : String(err) }));
+};
+const placeProgress = (text: string | null) => bus.emitEvent({ type: "place.progress", text });
+api.post("/place/children", placeRoute((b) => place.children(parsePath(b.path ?? []))));
+api.post("/place/scene", placeRoute((b) => place.scene(parsePath(b.path), placeProgress).finally(() => placeProgress(null))));
+api.post("/place/ui", placeRoute((b) => place.ui(parsePath(b.path))));
+api.post("/place/script", placeRoute((b) => place.script(parsePath(b.path))));
+api.post("/place/select", placeRoute((b) => place.select((Array.isArray(b.paths) ? b.paths : [b.path]).map(parsePath))));
+
 api.post("/studio/screenshot", wrap(async (_req, res) => {
   try {
     const r = await bridge.callTool("screen_capture", { capture_id: shortId("cap_") });

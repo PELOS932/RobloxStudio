@@ -10,6 +10,7 @@ import { ModelViewer } from "./ModelViewer.tsx";
 import { UiPreview } from "./UiPreview.tsx";
 import { ScriptView } from "./ScriptView.tsx";
 import { StudioPanel } from "./StudioPanel.tsx";
+import { PlacePanel } from "./PlacePanel.tsx";
 import { HtmlSourceView, retranslate } from "./HtmlTools.tsx";
 import { AssetThumb } from "./AssetThumb.tsx";
 
@@ -26,6 +27,9 @@ export function RightPanel() {
         <button className={`tab ${tab === "assets" ? "active" : ""}`} onClick={() => setRightTab("assets")}>
           <Icon name="grid" /> Assets <span className="count">{assets.length}</span>
         </button>
+        <button className={`tab ${tab === "place" ? "active" : ""}`} onClick={() => setRightTab("place")} title="Browse the open Studio place: Explorer, map, UIs and scripts">
+          <Icon name="map" /> Place
+        </button>
         <button className={`tab ${tab === "studio" ? "active" : ""}`} onClick={() => setRightTab("studio")}>
           <Icon name="plug" /> Studio <span className={`dot ${studio.state === "connected" ? (studio.studioId ? "ok" : "warn") : studio.state === "connecting" ? "busy" : studio.state === "error" ? "err" : ""}`} />
         </button>
@@ -33,6 +37,7 @@ export function RightPanel() {
       <div className="panel-body">
         {tab === "preview" && <PreviewPane />}
         {tab === "assets" && <AssetLibrary />}
+        {tab === "place" && <PlacePanel />}
         {tab === "studio" && <StudioPanel />}
       </div>
     </section>

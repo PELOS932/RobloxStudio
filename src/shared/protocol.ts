@@ -175,6 +175,7 @@ export type ServerEvent =
   | { type: "status"; convId: string; status: ConvStatus; error?: string }
   | { type: "queue"; convId: string; items: QueuedMessage[] }
   | { type: "limits"; limits: PlanUsage }
+  | { type: "place.progress"; text: string | null }
   | { type: "asset"; asset: AssetSummary; focus?: boolean }
   | { type: "asset.deleted"; id: string }
   | { type: "studio"; status: StudioStatus }

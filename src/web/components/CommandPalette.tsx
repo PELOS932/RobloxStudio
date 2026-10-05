@@ -3,6 +3,7 @@ import {
   exportConversation, importAsset, openAsset, openConversation, startNewChat, stopConversation, toast, updateSettings, useStore,
 } from "../store.ts";
 import { api } from "../lib/api.ts";
+import { openScene } from "../lib/place.ts";
 import { Icon, KindIcon, type IconName } from "../lib/icons.tsx";
 import { EFFORTS, MODELS } from "./Chat.tsx";
 import { timeAgo } from "./RightPanel.tsx";
@@ -91,6 +92,13 @@ function Palette() {
     act("html", "Translate HTML to a Roblox UI", "code", () => useStore.setState({ htmlImportOpen: true }), undefined, "import paste convert");
     act("tab-preview", "Show the preview", "eye", () => useStore.setState({ rightTab: "preview", mobileView: "panel" }));
     act("tab-assets", "Show all assets", "grid", () => useStore.setState({ rightTab: "assets", mobileView: "panel" }), undefined, "library");
+    act("tab-place", "Browse the Studio place", "map", () => useStore.setState({ rightTab: "place", mobileView: "panel" }), undefined, "explorer workspace tree scripts gui");
+    if (studioReady) {
+      act("place-map", "View the whole map in 3D", "map", () => {
+        useStore.setState({ rightTab: "place", mobileView: "panel" });
+        void openScene([["Workspace", 1]], { name: "Workspace", className: "Workspace", nth: 1, children: 0, parts: 0 });
+      }, undefined, "workspace baseplate terrain 3d place");
+    }
     act("tab-studio", "Show the Studio panel", "plug", () => useStore.setState({ rightTab: "studio", mobileView: "panel" }), undefined, "luau console");
     if (activeConvId) act("export-chat", "Export this chat as Markdown", "download", () => void exportConversation(activeConvId), undefined, "save transcript");
     act("sidebar", sidebarOpen ? "Hide the sidebar" : "Show the sidebar", "sidebar", () => useStore.setState({ sidebarOpen: !sidebarOpen }), undefined, "toggle");

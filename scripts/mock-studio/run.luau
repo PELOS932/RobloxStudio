@@ -68,10 +68,18 @@ local fakeGame = setmetatable({}, {
 	__eq = function() return true end,
 })
 
+-- Like Studio, keep `shared` between calls (only plain values survive in the mock).
+local sharedFile = placeFile .. ".shared.json"
+local shared = {}
+if fs.isFile(sharedFile) then
+	local ok, saved = pcall(serde.decode, "json", fs.readFile(sharedFile))
+	if ok and type(saved) == "table" then shared = saved end
+end
+
 local env = setmetatable({
 	game = fakeGame,
 	workspace = game:GetService("Workspace"),
-	shared = {},
+	shared = shared,
 	Instance = roblox.Instance, Vector3 = roblox.Vector3, Vector2 = roblox.Vector2, CFrame = roblox.CFrame,
 	Color3 = roblox.Color3, UDim = roblox.UDim, UDim2 = roblox.UDim2, Rect = roblox.Rect, Enum = roblox.Enum, Font = roblox.Font,
 	ColorSequence = roblox.ColorSequence, ColorSequenceKeypoint = roblox.ColorSequenceKeypoint,
@@ -86,4 +94,9 @@ if not ok then
 	process.exit(1)
 end
 fs.writeFile(placeFile, roblox.serializePlace(game))
+local keep = {}
+for key, value in shared do
+	if type(key) == "string" and pcall(serde.encode, "json", value) then keep[key] = value end
+end
+fs.writeFile(sharedFile, serde.encode("json", keep))
 stdio.write(if result == nil then "nil" else tostring(result))

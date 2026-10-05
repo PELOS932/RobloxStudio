@@ -8,12 +8,20 @@ import { FONTS } from "./roblox-data.ts";
 /** Max characters returned per execute_luau call (Studio caps results at ~100k). */
 export const PULL_CHUNK = 60_000;
 
-export function pullSelectionLuau(): string {
+/** Shared buffer for results larger than one execute_luau reply. */
+export const PULL_KEY = "__forgePull";
+
+/**
+ * Read instances into Studio Forge specs. By default it reads the Studio selection;
+ * `target` can be any Luau expression returning a list of instances (after `prelude`).
+ */
+export function pullSelectionLuau(opts: { target?: string; prelude?: string; key?: string } = {}): string {
   const faces = Object.entries(FONTS).map(([name, f]) => `["${f.family}:${f.weight}:${f.style}"] = "${name}"`).join(", ");
   return String.raw`
 local HttpService = game:GetService("HttpService")
 local FONT_BY_FACE = { ${faces} }
-local selection = game:GetService("Selection"):Get()
+${opts.prelude ?? ""}
+local selection = ${opts.target ?? 'game:GetService("Selection"):Get()'}
 
 local function r(n, d)
 	local f = 10 ^ (d or 3)
@@ -82,10 +90,15 @@ elseif wantsGui then
 			n.text = obj.Text
 			set(n, "textColor", hex(obj.TextColor3), "#ffffff")
 			set(n, "textSize", obj.TextSize, 18)
-			local fontName = obj.Font.Name
+			-- Font is the legacy enum; FontFace covers fonts it can't express.
+			local okFont, fontName = pcall(function() return obj.Font.Name end)
+			if not okFont or not fontName then fontName = "Unknown" end
 			if fontName == "Unknown" then
-				local family = string.match(obj.FontFace.Family, "families/([%w]+)%.json")
-				fontName = FONT_BY_FACE[(family or "") .. ":" .. obj.FontFace.Weight.Value .. ":" .. obj.FontFace.Style.Name] or "Unknown"
+				pcall(function()
+					local face = obj.FontFace
+					local family = string.match(face.Family, "families/([%w]+)%.json")
+					fontName = FONT_BY_FACE[(family or "") .. ":" .. face.Weight.Value .. ":" .. face.Style.Name] or "Unknown"
+				end)
 			end
 			if fontName ~= "Unknown" then set(n, "font", fontName, "GothamMedium") end
 			set(n, "textScaled", obj.TextScaled, false)
@@ -119,39 +132,42 @@ elseif wantsGui then
 			set(n, "scrollColor", hex(obj.ScrollBarImageColor3), "#ffffff")
 		end
 		for _, child in obj:GetChildren() do
-			if child:IsA("UICorner") then
-				n.corner = if child.CornerRadius.Scale == 0 then child.CornerRadius.Offset else { r(child.CornerRadius.Scale), child.CornerRadius.Offset }
-			elseif child:IsA("UIStroke") and child.ApplyStrokeMode == Enum.ApplyStrokeMode.Border then
-				n.stroke = { color = hex(child.Color), thickness = r(child.Thickness), transparency = r(child.Transparency) }
-			elseif child:IsA("UIGradient") then
-				local colors, transparency = {}, {}
-				for _, kp in child.Color.Keypoints do table.insert(colors, hex(kp.Value)) end
-				for _, kp in child.Transparency.Keypoints do table.insert(transparency, r(kp.Value)) end
-				n.gradient = { colors = colors, rotation = r(child.Rotation) }
-				if #transparency >= 2 and (transparency[1] ~= 0 or transparency[#transparency] ~= 0) then n.gradient.transparency = transparency end
-			elseif child:IsA("UIPadding") then
-				n.padding = { child.PaddingTop.Offset, child.PaddingRight.Offset, child.PaddingBottom.Offset, child.PaddingLeft.Offset }
-			elseif child:IsA("UIListLayout") then
-				n.layout = {
-					type = "list",
-					dir = if child.FillDirection == Enum.FillDirection.Horizontal then "horizontal" else "vertical",
-					gap = child.Padding.Offset,
-					hAlign = hAlign[child.HorizontalAlignment] or "left",
-					vAlign = vAlign[child.VerticalAlignment] or "top",
-					wraps = child.Wraps or nil,
-				}
-			elseif child:IsA("UIGridLayout") then
-				n.layout = {
-					type = "grid",
-					cell = udim2(child.CellSize),
-					cellGap = { child.CellPadding.X.Offset, child.CellPadding.Y.Offset },
-					hAlign = hAlign[child.HorizontalAlignment] or "left",
-					vAlign = vAlign[child.VerticalAlignment] or "top",
-					maxCells = if child.FillDirectionMaxCells > 0 then child.FillDirectionMaxCells else nil,
-				}
-			elseif child:IsA("UIAspectRatioConstraint") then
-				n.aspect = r(child.AspectRatio, 4)
-			end
+			-- One unreadable decorator should not lose the whole UI.
+			pcall(function()
+				if child:IsA("UICorner") then
+					n.corner = if child.CornerRadius.Scale == 0 then child.CornerRadius.Offset else { r(child.CornerRadius.Scale), child.CornerRadius.Offset }
+				elseif child:IsA("UIStroke") and child.ApplyStrokeMode == Enum.ApplyStrokeMode.Border then
+					n.stroke = { color = hex(child.Color), thickness = r(child.Thickness), transparency = r(child.Transparency) }
+				elseif child:IsA("UIGradient") then
+					local colors, transparency = {}, {}
+					for _, kp in child.Color.Keypoints do table.insert(colors, hex(kp.Value)) end
+					for _, kp in child.Transparency.Keypoints do table.insert(transparency, r(kp.Value)) end
+					n.gradient = { colors = colors, rotation = r(child.Rotation) }
+					if #transparency >= 2 and (transparency[1] ~= 0 or transparency[#transparency] ~= 0) then n.gradient.transparency = transparency end
+				elseif child:IsA("UIPadding") then
+					n.padding = { child.PaddingTop.Offset, child.PaddingRight.Offset, child.PaddingBottom.Offset, child.PaddingLeft.Offset }
+				elseif child:IsA("UIListLayout") then
+					n.layout = {
+						type = "list",
+						dir = if child.FillDirection == Enum.FillDirection.Horizontal then "horizontal" else "vertical",
+						gap = child.Padding.Offset,
+						hAlign = hAlign[child.HorizontalAlignment] or "left",
+						vAlign = vAlign[child.VerticalAlignment] or "top",
+						wraps = child.Wraps or nil,
+					}
+				elseif child:IsA("UIGridLayout") then
+					n.layout = {
+						type = "grid",
+						cell = udim2(child.CellSize),
+						cellGap = { child.CellPadding.X.Offset, child.CellPadding.Y.Offset },
+						hAlign = hAlign[child.HorizontalAlignment] or "left",
+						vAlign = vAlign[child.VerticalAlignment] or "top",
+						maxCells = if child.FillDirectionMaxCells > 0 then child.FillDirectionMaxCells else nil,
+					}
+				elseif child:IsA("UIAspectRatioConstraint") then
+					n.aspect = r(child.AspectRatio, 4)
+				end
+			end)
 		end
 		table.insert(nodes, n)
 		for _, child in obj:GetChildren() do walk(child, n.name) end
@@ -167,9 +183,14 @@ elseif wantsGui then
 	end
 	local spec = { name = if screen then screen.Name else selection[1].Name, nodes = nodes }
 	if screen then
-		spec.ignoreInset = screen.IgnoreGuiInset
-		spec.resetOnSpawn = screen.ResetOnSpawn
-		spec.displayOrder = screen.DisplayOrder
+		-- IgnoreGuiInset is the legacy form of ScreenInsets.
+		local okInset, inset = pcall(function() return screen.IgnoreGuiInset end)
+		if not okInset then
+			okInset, inset = pcall(function() return screen.ScreenInsets ~= Enum.ScreenInsets.CoreUISafeInsets end)
+		end
+		spec.ignoreInset = okInset and inset == true
+		pcall(function() spec.resetOnSpawn = screen.ResetOnSpawn end)
+		pcall(function() spec.displayOrder = screen.DisplayOrder end)
 	end
 	result = { kind = "ui", spec = spec, skipped = skipped }
 else
@@ -243,7 +264,23 @@ else
 	result = { kind = if #out > 0 then "model" else "empty", spec = { name = name, parts = out }, skipped = skipped }
 end
 
--- Escape non-ASCII so chunk boundaries can never split a UTF-8 sequence.
+${jsonReturnLuau("result", opts.key ?? PULL_KEY)}
+`;
+}
+
+export function pullChunkLuau(start: number, key = PULL_KEY): string {
+  return `local json = shared[${luaString(key)}]
+if not json then return ${luaString('{"error":"pull buffer missing"}')} end
+if ${start + PULL_CHUNK} >= #json then shared[${luaString(key)}] = nil end
+return game:GetService("HttpService"):JSONEncode({ total = #json, chunk = string.sub(json, ${start + 1}, ${start + PULL_CHUNK}) })`;
+}
+
+/**
+ * Luau tail that returns the JSON of a local value in chunks: the first chunk now, the rest
+ * through pullChunkLuau. Non-ASCII is escaped so a chunk boundary never splits a UTF-8 sequence.
+ */
+export function jsonReturnLuau(value: string, key = PULL_KEY): string {
+  return String.raw`
 local function asciiJson(s)
 	return (string.gsub(s, "[\128-\255]+", function(seq)
 		local out = {}
@@ -261,14 +298,8 @@ local function asciiJson(s)
 	end))
 end
 
-local json = asciiJson(HttpService:JSONEncode(result))
-shared.__forgePull = json
-return HttpService:JSONEncode({ total = #json, chunk = string.sub(json, 1, ${PULL_CHUNK}) })
+local json = asciiJson(game:GetService("HttpService"):JSONEncode(${value}))
+shared[${luaString(key)}] = json
+return game:GetService("HttpService"):JSONEncode({ total = #json, chunk = string.sub(json, 1, ${PULL_CHUNK}) })
 `;
-}
-
-export function pullChunkLuau(start: number): string {
-  return `local json = shared.__forgePull
-if not json then return ${luaString("{\"error\":\"pull buffer missing\"}")} end
-return game:GetService("HttpService"):JSONEncode({ total = #json, chunk = string.sub(json, ${start + 1}, ${start + PULL_CHUNK}) })`;
 }

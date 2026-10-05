@@ -5,7 +5,7 @@ import type {
   HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
-export type RightTab = "preview" | "assets" | "studio";
+export type RightTab = "preview" | "assets" | "place" | "studio";
 export type MobileView = "chats" | "chat" | "panel";
 
 export interface Toast {
@@ -25,6 +25,8 @@ interface State {
   queues: Record<string, QueuedMessage[]>;
   /** Claude subscription usage (live while Claude works). */
   limits: PlanUsage | null;
+  /** Progress of a running map transfer from Studio (Place tab). */
+  placeProgress: string | null;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -58,6 +60,7 @@ export const useStore = create<State>(() => ({
   running: {},
   queues: {},
   limits: null,
+  placeProgress: null,
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -162,6 +165,9 @@ function onEvent(e: ServerEvent) {
       break;
     case "limits":
       set({ limits: e.limits });
+      break;
+    case "place.progress":
+      set({ placeProgress: e.text });
       break;
     case "asset":
       set((s) => {

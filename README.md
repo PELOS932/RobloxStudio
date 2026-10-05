@@ -23,6 +23,7 @@ A dark-themed chat app that runs **Claude Code in the background** and connects 
 - **Scripts.** Script, LocalScript and ModuleScript assets are inserted at any path.
 - **One-click import (or auto-import).** Assets are converted to Luau deterministically and run through the Studio MCP. Imports are **undoable** (ChangeHistoryService). Re-importing **updates the previous copy in place**, keeping its position, and the new object is selected in Studio.
 - **Export and import.** Download any asset as `.rbxmx` (drag into Studio), `.luau` (paste into the command bar) or `.json`. Pull the current Studio selection (Parts/Models or GUIs) back into the app, let Claude improve it, then push it back.
+- **Browse your Studio place.** The **Place** tab shows Studio's Explorer for the open place, read live through the Studio MCP: every service, folder, model, part, GUI and script, with part counts. Click a model, a folder or **Map** to see it in 3D (the baseplate, every part and the terrain with its water; maps with tens of thousands of parts stay smooth). ScreenGuis open in the UI preview, and scripts open as highlighted code. From any of them you can select it in Studio, ask Claude about it, or save a copy to your assets so Claude can edit it.
 - **Studio tools for Claude.** Claude can run Luau, search the instance tree, inspect instances, read and edit scripts, take viewport screenshots it can see, play-test and read the Output window. Luau and script edits ask for your approval first (configurable).
 - **Faster games.** On import, touching identical blocks are merged (fewer parts, same look). Parts are anchored, CanTouch is turned off, and tiny or neon parts skip shadows.
 
@@ -175,3 +176,4 @@ The tests that execute generated Luau need [Lune](https://lune-org.github.io/doc
 - HTML translation is a faithful snapshot of the rendered page, not a live layout. Lists built from HTML use absolute positions, not `UIListLayout`. Layered frames only approximate soft shadows.
 - Image previews load `rbxassetid://` thumbnails through Roblox's public thumbnail API. Unknown ids show a placeholder.
 - Parts only (no MeshParts or unions). Pulling a selection skips unsupported objects and lists them.
+- The Place tab shows a snapshot (press reload to read Studio again). MeshParts and unions are drawn as their bounding boxes, because their geometry can't be downloaded without your Roblox credentials. Decals, textures, particles and lights aren't drawn. Terrain is a height map sampled from above (so caves and overhangs are missing), within 4096 studs of the origin.

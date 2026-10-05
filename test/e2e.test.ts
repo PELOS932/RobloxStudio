@@ -133,6 +133,25 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(JSON.parse(await (await fetch(`${BASE}/api/assets/${modelId}/export?format=json`)).text()).kind).toBe("model");
   });
 
+  it("browses the open place: Explorer, map, scripts and selection", async () => {
+    const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
+    const top = (await post("/api/place/children", { path: [] })).body;
+    expect(top.items.map((i: { name: string }) => i.name)).toContain("Workspace");
+    const ws = (await post("/api/place/children", { path: [["Workspace", 1]] })).body;
+    expect(ws.items.find((i: { name: string }) => i.name === "Lantern")).toMatchObject({ className: "Model", parts: 3 });
+
+    const lantern = [["Workspace", 1], ["Lantern", 1]];
+    const scene = (await post("/api/place/scene", { path: lantern })).body;
+    expect(scene.parts).toHaveLength(3);
+    expect(scene.materials).toEqual(expect.arrayContaining(["Slate", "Metal", "Neon"]));
+    await waitFor("place.progress", (e) => e.text === null);
+
+    expect((await post("/api/place/select", { paths: [lantern] })).body).toEqual({ selected: 1 });
+    const bad = await post("/api/place/script", { path: lantern });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/not a script/);
+  });
+
   it("asks the user before running Luau in Studio, then runs it", async () => {
     const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
     ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "run some luau" }));
