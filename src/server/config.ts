@@ -69,7 +69,7 @@ export const DEFAULT_SETTINGS: Settings = {
   claudePath: process.env.CLAUDE_PATH ?? "claude",
   workspaceDir: join(DATA_DIR, "workspace"),
   studio: { command: "", args: [], autoConnect: true },
-  import: { placement: "camera", optimize: true, performance: true, replace: true },
+  import: { placement: "camera", faceCamera: true, optimize: true, performance: true, replace: true },
 };
 
 const SETTINGS_FILE = join(DATA_DIR, "settings.json");

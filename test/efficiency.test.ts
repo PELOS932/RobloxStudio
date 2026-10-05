@@ -4,6 +4,8 @@ import { expandModelInput, ModelSpecInputSchema, ModelSpecSchema, sanitizeModelS
 import { expandUiInput, sanitizeUiSpec, UiSpecInputSchema, UiSpecSchema } from "../src/shared/ui.ts";
 import { modelToLuau, uiToLuau } from "../src/shared/to-luau.ts";
 import { ForgeMcp } from "../src/server/forge-mcp.ts";
+import { compactModel, compactUi, nodesUnder, partsInGroup } from "../src/shared/compact.ts";
+import { checkModel, describeIssues } from "../src/shared/diagnostics.ts";
 
 describe("spec shorthand", () => {
   it("expands styles, repeat, copies and clones into plain parts", () => {
@@ -76,5 +78,61 @@ describe("token and payload budgets", () => {
   it("moves models with Model:PivotTo when available", () => {
     const cabin = sanitizeModelSpec(ModelSpecSchema.parse(JSON.parse(readFileSync("examples/cozy-cabin.model.json", "utf8")).spec));
     expect(modelToLuau(cabin).code).toContain("model:PivotTo(target)");
+  });
+});
+
+describe("get_asset compact form", () => {
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(canon) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon((v as Record<string, unknown>)[k])])) : v;
+
+  it("factors repeated looks into styles and expands back to the same model", () => {
+    const cabin = sanitizeModelSpec(ModelSpecSchema.parse(JSON.parse(readFileSync("examples/cozy-cabin.model.json", "utf8")).spec));
+    const compact = compactModel(cabin);
+    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(cabin).length * 0.9);
+    expect(canon(sanitizeModelSpec(expandModelInput(ModelSpecInputSchema.parse(compact))))).toEqual(canon(cabin));
+  });
+
+  it("does the same for UIs", () => {
+    const shop = sanitizeUiSpec(UiSpecSchema.parse(JSON.parse(readFileSync("examples/item-shop.ui.json", "utf8")).spec)).spec;
+    const compact = compactUi(shop);
+    expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(shop).length * 0.85);
+    expect(canon(sanitizeUiSpec(expandUiInput(UiSpecInputSchema.parse(compact))).spec)).toEqual(canon(shop));
+  });
+
+  it("reads one group of a model, or a node with its children", () => {
+    const cabin = sanitizeModelSpec(ModelSpecSchema.parse(JSON.parse(readFileSync("examples/cozy-cabin.model.json", "utf8")).spec));
+    const windows = partsInGroup(cabin.parts, "Cabin/Windows");
+    expect(windows.length).toBeGreaterThan(3);
+    expect(windows.every((p) => p.group === "Cabin/Windows")).toBe(true);
+    expect(partsInGroup(cabin.parts, "Cabin").length).toBeGreaterThan(windows.length);
+    const shop = sanitizeUiSpec(UiSpecSchema.parse(JSON.parse(readFileSync("examples/item-shop.ui.json", "utf8")).spec)).spec;
+    const grid = nodesUnder(shop.nodes, ["Grid"]);
+    expect(grid[0].name).toBe("Grid");
+    expect(grid.length).toBeGreaterThan(4);
+  });
+});
+
+describe("positioning checks", () => {
+  const model = (parts: unknown[]) => sanitizeModelSpec(ModelSpecSchema.parse({ name: "T", parts }));
+
+  it("finds floating parts, parts below the ground, z-fighting and duplicates", () => {
+    const issues = checkModel(model([
+      { name: "Floor", size: [10, 1, 10], pos: [0, 0.5, 0], color: "#808080" },
+      { name: "Rug", size: [4, 1, 4], pos: [0, 0.5, 0], color: "#aa2222" }, // top face level with the floor's
+      { name: "Bird", size: [1, 1, 1], pos: [0, 6, 0] }, // touches nothing
+      { name: "Glow", size: [1, 1, 1], pos: [3, 6, 0], material: "Neon" }, // effects may hover
+      { name: "Post", size: [1, 4, 1], pos: [4, 1, 4] }, // reaches y = -1
+      { name: "PostCopy", size: [1, 4, 1], pos: [4, 1, 4] },
+    ]));
+    expect(issues.floating).toEqual(["Bird"]);
+    expect(issues.belowGround).toEqual({ depth: 1, parts: ["Post", "PostCopy"] });
+    expect(issues.zFighting).toEqual([expect.objectContaining({ face: "top" })]);
+    expect(issues.duplicates).toEqual([["Post", "PostCopy"]]);
+    expect(describeIssues(issues)).toHaveLength(4);
+  });
+
+  it("stays quiet for a well-built model", () => {
+    const cabin = sanitizeModelSpec(ModelSpecSchema.parse(JSON.parse(readFileSync("examples/cozy-cabin.model.json", "utf8")).spec));
+    expect(describeIssues(checkModel(cabin))).toEqual([]);
   });
 });

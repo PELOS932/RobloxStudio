@@ -18,6 +18,8 @@ import {
   applyUiEdit, expandUiInput, expandUiNodes, sanitizeUiSpec, UiEditSchema, UiNodeInputSchema, UiSpecInputSchema, UiStylesSchema, type UiSpec,
 } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
+import { checkModel, describeIssues } from "../shared/diagnostics.ts";
+import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from "../shared/compact.ts";
 import { sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
@@ -196,6 +198,8 @@ export class ForgeMcp {
   private async afterSave(asset: Asset, verb: string, ctx: Ctx, warnings: string[] = []): Promise<ToolResult> {
     const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${dims(asset)}). Shown in the preview.`];
     if (warnings.length) lines.push(`Notes: ${warnings.slice(0, 8).join("; ")}`);
+    // Positioning problems Claude can fix before the user notices (floating parts, flicker…).
+    if (asset.kind === "model") lines.push(...describeIssues(checkModel(asset.spec)));
     const s = this.deps.getSettings();
     if (s.autoImport && this.deps.bridge.connected && this.deps.bridge.status.studioId) {
       ctx.progress(`Saved v${asset.version} (${sizeLabel(asset.kind, summarize(asset).size)}). Importing into Studio…`);
@@ -387,11 +391,31 @@ export class ForgeMcp {
       },
       {
         name: "get_asset",
-        description: "Return an asset's full spec as JSON (needed before editing assets made outside this conversation).",
-        schema: z.object({ id }),
-        run: async ({ id: assetId }) => {
+        description:
+          "Return an asset's spec as JSON in create_* input format (repeated looks are factored into styles). Read only what you need: names (parts/nodes; UI nodes include their children) or group (models).",
+        schema: z.object({
+          id,
+          names: z.array(z.string()).optional().describe("only these parts/nodes"),
+          group: z.string().optional().describe("models: only this group path and its subgroups"),
+          full: z.boolean().optional().describe("models over 600 parts: return everything instead of an outline"),
+        }),
+        run: async ({ id: assetId, names, group, full }) => {
           const a = assets.get(assetId);
           if (!a) return text(`No asset with id ${assetId}.`, true);
+          if (a.kind === "model") {
+            const wanted = names ? new Set(names) : null;
+            const parts = wanted ? a.spec.parts.filter((p) => wanted.has(p.name ?? "")) : group ? partsInGroup(a.spec.parts, group) : a.spec.parts;
+            if (!wanted && !group && !full && parts.length > 600) {
+              return text(`"${a.name}" has ${parts.length} parts. Groups:\n${modelOutline(a.spec)}\nRead one with group, or pass full: true.`);
+            }
+            const note = parts.length !== a.spec.parts.length ? `\n(${parts.length} of ${a.spec.parts.length} parts)` : "";
+            return text(JSON.stringify(compactModel({ ...a.spec, parts })) + note);
+          }
+          if (a.kind === "ui") {
+            const nodes = names ? nodesUnder(a.spec.nodes, names) : a.spec.nodes;
+            const note = nodes.length !== a.spec.nodes.length ? `\n(${nodes.length} of ${a.spec.nodes.length} nodes)` : "";
+            return text(JSON.stringify(compactUi({ ...a.spec, nodes })) + note);
+          }
           return text(JSON.stringify(a.spec));
         },
       },

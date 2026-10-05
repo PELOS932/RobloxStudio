@@ -21,6 +21,8 @@ export interface ImportOptions {
   parent?: string;
   /** Models only. camera = in front of the Studio camera on the ground; origin = at 0,0,0; keep = spec coordinates. */
   placement?: "camera" | "origin" | "keep";
+  /** Camera placement: turn the model's front (-Z) toward the camera, in 90° steps. */
+  faceCamera?: boolean;
   /** Replace a previous import of the same asset (keeps its position). */
   replace?: boolean;
   /** Merge identical touching blocks to cut part count. */
@@ -246,14 +248,30 @@ ${lines.join("\n")}
 		previous.Parent = nil
 	elseif PLACEMENT == "camera" then
 		local placed = pcall(function()
-			local camera = workspace.CurrentCamera
-			local distance = math.max(16, ${luaNum(extent)} * 1.5)
-			local target = camera.CFrame.Position + camera.CFrame.LookVector * distance
+			local cam = workspace.CurrentCamera.CFrame
+			local extent = ${luaNum(extent)}
 			local params = RaycastParams.new()
 			params.FilterType = Enum.RaycastFilterType.Exclude
 			params.FilterDescendantsInstances = { model }
-			local hit = workspace:Raycast(target + Vector3.new(0, 500, 0), Vector3.new(0, -2000, 0), params)
-			pivotTo(CFrame.new(target.X, if hit then hit.Position.Y else 0, target.Z))
+			-- Where the camera looks (the middle of the viewport), if that is a floor far enough away…
+			local target
+			local look = workspace:Raycast(cam.Position, cam.LookVector * math.max(256, extent * 8), params)
+			if look and look.Normal.Y > 0.6 and look.Distance > extent * 0.8 then
+				target = look.Position
+			else
+				-- …otherwise straight ahead, dropped onto whatever is below.
+				local ahead = cam.Position + cam.LookVector * math.max(16, extent * 1.5)
+				local hit = workspace:Raycast(ahead + Vector3.new(0, 500, 0), Vector3.new(0, -2000, 0), params)
+				target = Vector3.new(ahead.X, if hit then hit.Position.Y else 0, ahead.Z)
+			end
+			-- On whole studs, with the model's front (-Z) turned toward the camera in 90° steps.
+			local x, z = math.round(target.X), math.round(target.Z)
+			local dx, dz = cam.Position.X - x, cam.Position.Z - z
+			local yaw = 0
+			if ${opts.faceCamera ?? true} and dx * dx + dz * dz > 0.01 then
+				yaw = math.round(math.atan2(-dx, -dz) / (math.pi / 2)) * (math.pi / 2)
+			end
+			pivotTo(CFrame.new(x, target.Y, z) * CFrame.Angles(0, yaw, 0))
 		end)
 		if not placed then pivotTo(CFrame.new(0, 0, 0)) end
 	elseif PLACEMENT == "origin" then

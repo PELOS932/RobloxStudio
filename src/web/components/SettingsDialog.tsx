@@ -242,7 +242,7 @@ function ImportSettings({ s }: { s: Settings }) {
         <label>Where new models are placed</label>
         <div className="choice-grid">
           {([
-            ["camera", "In front of the camera", "On the ground where you're looking"],
+            ["camera", "Where you're looking", "On the surface in the middle of the Studio view"],
             ["origin", "At the origin", "Bottom-center at 0, 0, 0"],
             ["keep", "Spec coordinates", "Exactly as designed"],
           ] as const).map(([id, title, sub]) => (
@@ -253,6 +253,11 @@ function ImportSettings({ s }: { s: Settings }) {
           ))}
         </div>
       </div>
+      {s.import.placement === "camera" && (
+        <Toggle on={s.import.faceCamera} onChange={(v) => set({ faceCamera: v })} title="Face the camera">
+          Turns new models so their front faces you (in 90° steps), snapped to whole studs.
+        </Toggle>
+      )}
       <Toggle on={s.import.replace} onChange={(v) => set({ replace: v })} title="Update in place">
         Re-importing an asset replaces its previous copy (keeping its position) instead of adding a duplicate.
       </Toggle>

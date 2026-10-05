@@ -7,6 +7,8 @@ export type ToolMode = "studio" | "full";
 
 export interface ImportDefaults {
   placement: "camera" | "origin" | "keep";
+  /** Camera placement: turn the model's front toward the camera (in 90° steps). */
+  faceCamera: boolean;
   optimize: boolean;
   performance: boolean;
   replace: boolean;
