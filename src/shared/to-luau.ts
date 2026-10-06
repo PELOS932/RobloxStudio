@@ -13,7 +13,7 @@ import {
   type UiSpec, type UiTreeNode,
 } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
-import { animationLength, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue, type Rig } from "./animation.ts";
+import { animationLength, bakedKeyframes, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue, type Rig } from "./animation.ts";
 import { vfxSummary, vfxTree, type VfxSpec } from "./vfx.ts";
 import { treeToLuau } from "./instance-tree.ts";
 import { abilityTrees } from "./ability-studio.ts";
@@ -572,7 +572,7 @@ export function animationToLuau(spec: AnimationSpec, opts: ImportOptions = {}): 
   const parentOf = rig.joints.map((j) => `[${luaString(j.part1)}] = ${luaString(j.part0)}`);
   const styleNames = Object.values(POSE_STYLES);
   const dirNames = Object.values(POSE_DIRS);
-  const keyframes = spec.keyframes.map((k) => {
+  const keyframes = bakedKeyframes(spec).map((k) => {
     const poses: string[] = [];
     for (const [name, value] of Object.entries(k.poses) as [Joint, PoseValue][]) {
       const j = joints.get(name);

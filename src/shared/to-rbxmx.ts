@@ -16,7 +16,7 @@ import {
   type UiSpec, type UiTreeNode,
 } from "./ui.ts";
 import type { ScriptSpec } from "./script.ts";
-import { jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue } from "./animation.ts";
+import { bakedKeyframes, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue } from "./animation.ts";
 import { eulerXYZDeg } from "./math.ts";
 import type { ImportOptions } from "./to-luau.ts";
 import { vfxTree, type VfxSpec } from "./vfx.ts";
@@ -371,7 +371,7 @@ export function animationToRbxmx(spec: AnimationSpec, opts: ImportOptions = {}):
   w.open("KeyframeSequence", [
     str("Name", spec.name), bool("Loop", spec.loop ?? true), token("Priority", PRIORITY_TOKEN[spec.priority ?? "Action"]), ...forgeAttrs(opts),
   ]);
-  for (const k of spec.keyframes) {
+  for (const k of bakedKeyframes(spec)) {
     w.open("Keyframe", [str("Name", k.name ?? "Keyframe"), float("Time", k.t)]);
     const posed = new Map<string, { pos: number[]; rot: number[] }>();
     for (const [name, value] of Object.entries(k.poses) as [Joint, PoseValue][]) {

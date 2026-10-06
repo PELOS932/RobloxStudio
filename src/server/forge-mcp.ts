@@ -20,7 +20,8 @@ import {
 import { ScriptSpecSchema } from "../shared/script.ts";
 import { checkModel, describeIssues } from "../shared/diagnostics.ts";
 import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from "../shared/compact.ts";
-import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
+import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, checkAnimation, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
+import { POSE_NAMES } from "../shared/poses.ts";
 import { applyVfxEdit, PARTICLE_PRESET_NAMES, VfxEditSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
 import { scriptsToLuau } from "../shared/to-luau.ts";
 import { AbilityEditSchema, AbilitySpecInputSchema, applyAbilityEdit, ATTACH_POINTS, expandAbilityInput, sanitizeAbilitySpec } from "../shared/ability.ts";
@@ -232,8 +233,13 @@ export class ForgeMcp {
     }
     const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${extra}). Shown in the preview.`];
     if (warnings.length) lines.push(`Notes: ${warnings.slice(0, 8).join("; ")}`);
-    // Positioning problems Claude can fix before the user notices (floating parts, flicker…).
+    // Problems Claude can fix before the user notices (floating parts, flicker, bent-back knees…).
     if (asset.kind === "model") lines.push(...describeIssues(checkModel(asset.spec)));
+    if (asset.kind === "animation") lines.push(...checkAnimation(asset.spec).map((l) => `Check: ${l}`));
+    if (asset.kind === "ability") {
+      const r = resolveStored(asset.spec);
+      if (r.animation && typeof asset.spec.animation !== "string") lines.push(...checkAnimation(r.animation).map((l) => `Check (animation): ${l}`));
+    }
     const s = this.deps.getSettings();
     if (s.autoImport && this.deps.bridge.connected && this.deps.bridge.status.studioId) {
       ctx.progress(`Saved v${asset.version} (${sizeLabel(asset.kind, summarize(asset).size)}). Importing into Studio…`);
@@ -403,10 +409,10 @@ export class ForgeMcp {
       {
         name: "create_animation",
         description:
-          "Create (or replace, with id) a character animation for an R15 or R6 rig. It plays live in the preview; importing saves a KeyframeSequence the Animation Editor can load onto a dummy rig.",
+          "Create (or replace, with id) a character animation for an R15 or R6 rig. It plays live in the preview; importing saves a KeyframeSequence the Animation Editor can load onto a dummy rig. The result checks for bent-back joints, feet in the floor and loop jumps.",
         schema: AnimationSpecSchema.extend({ id: id.optional().describe("replace this existing animation") }),
         advertise: (s) => looseItems(s, {
-          keyframes: "[{t: seconds, poses: {joint: [x,y,z] degrees | {rot, pos}}, ease?: linear|constant|cubic|elastic|bounce, dir?: in|out|inOut, name?}] — joints: root waist neck left/right Shoulder Elbow Wrist Hip Knee Ankle",
+          keyframes: `[{t: seconds, pose?: named pose (${POSE_NAMES.join("|")}), from?: t of a keyframe to copy, mirror?: flip pose/from left↔right, poses?: {joint: [x,y,z] degrees | {rot, pos}} (tweaks on top), ease?: linear|constant|cubic|elastic|bounce, dir?: in|out|inOut, name?}] — joints: root waist neck left/right Shoulder Elbow Wrist Hip Knee Ankle (hips/knees/… set both sides inside named poses only)`,
         }),
         run: async ({ id: replaceId, ...raw }, ctx) => {
           const spec = sanitizeAnimationSpec(raw);
@@ -417,7 +423,7 @@ export class ForgeMcp {
       },
       {
         name: "edit_animation",
-        description: "Change an animation: merge keyframes by time (only the joints you list change), remove keyframes or joints, retime with speed, or switch rig/loop/priority.",
+        description: "Change an animation: merge keyframes by time (only the joints you list change; a pose/from/mirror rebuilds that keyframe), remove keyframes or joints, retime with speed, set overlap, or switch rig/loop/priority.",
         schema: AnimationEditSchema.extend({ id }),
         advertise: (s) => looseItems(s, { keyframes: "same format as create_animation keyframes; merged into the keyframe at the same t" }),
         run: async ({ id: assetId, ...edit }, ctx) => {

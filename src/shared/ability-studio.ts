@@ -5,7 +5,7 @@
 // require(Abilities.<Name>.Play)(character) casts it from any script. The animation plays through
 // the AnimationId attribute once you publish it, and through a temporary Studio id until then.
 
-import { jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue } from "./animation.ts";
+import { bakedKeyframes, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue } from "./animation.ts";
 import { ATTACH, type ResolvedAbility } from "./ability.ts";
 import { eulerXYZDeg } from "./math.ts";
 import { vfxTree } from "./vfx.ts";
@@ -29,7 +29,7 @@ export function animationTree(spec: AnimationSpec, name = "Animation"): InstNode
     props: { Loop: spec.loop ?? true, Priority: { enum: "AnimationPriority", item: priority, token: PRIORITY[priority] } },
     children: [],
   };
-  for (const k of spec.keyframes) {
+  for (const k of bakedKeyframes(spec)) {
     const posed = new Map<string, { pos: number[]; rot: number[] }>();
     for (const [joint, value] of Object.entries(k.poses) as [Joint, PoseValue][]) {
       const j = joints.get(joint);
@@ -287,7 +287,7 @@ end)
 /** Hash of the animation, so a re-import keeps a published AnimationId only while the animation is unchanged. */
 export function animationHash(spec: AnimationSpec | null): string {
   if (!spec) return "";
-  const s = JSON.stringify({ k: spec.keyframes, r: spec.rig, l: spec.loop, p: spec.priority, n: spec.length });
+  const s = JSON.stringify({ k: spec.keyframes, r: spec.rig, l: spec.loop, p: spec.priority, n: spec.length, o: spec.overlap });
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
   return h.toString(16);

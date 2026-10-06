@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  animationLength, AnimationSpecSchema, buildTracks, ease, poseRig, RIGS, sampleTracks, sanitizeAnimationSpec, unsupportedJoints, type AnimationSpec,
+  animationLength, AnimationSpecSchema, applyAnimationEdit, bakedKeyframes, buildTracks, checkAnimation, ease, poseRig, RIGS, sampleTracks, sanitizeAnimationSpec,
+  unsupportedJoints, type AnimationSpec,
 } from "../src/shared/animation.ts";
+import { namedPose, POSE_NAMES } from "../src/shared/poses.ts";
 import { animationToLuau } from "../src/shared/to-luau.ts";
 import { animationToRbxmx } from "../src/shared/to-rbxmx.ts";
 
@@ -55,6 +57,89 @@ describe("animation specs", () => {
     for (const style of ["linear", "cubic", "elastic", "bounce"] as const) {
       for (const d of ["in", "out", "inOut"] as const) expect(ease(style, d, 1)).toBeCloseTo(1, 6);
     }
+  });
+
+  it("builds keyframes from named poses, copies and mirrors", () => {
+    const s = sanitizeAnimationSpec(AnimationSpecSchema.parse({
+      name: "Combo", rig: "R15", loop: false,
+      keyframes: [
+        { t: 0, pose: "guard" },
+        { t: 0.2, pose: "punch", poses: { neck: [5, 0, 0] } },
+        { t: 0.4, from: 0.2, mirror: true },
+        { t: 0.6, from: 0 },
+      ],
+    }));
+    const [guard, punch, left, back] = s.keyframes;
+    expect(guard.poses).toEqual(namedPose("guard"));
+    expect(punch.poses.rightShoulder).toEqual([90, 0, 25]);
+    expect(punch.poses.neck).toEqual([5, 0, 0]);
+    // The mirrored punch is thrown with the left arm, turning the other way.
+    expect(left.poses.leftShoulder).toEqual([90, 0, -25]);
+    expect(left.poses.rightShoulder).toEqual([45, 0, -15]);
+    expect(left.poses.waist).toEqual([-5, -25, 0]);
+    expect(left.poses.neck).toEqual([5, 0, 0]);
+    expect(back.poses).toEqual(guard.poses);
+    for (const k of s.keyframes) expect(Object.keys(k).sort()).not.toContain("pose");
+    // R6 keeps only the joints it has.
+    const r6 = sanitizeAnimationSpec(AnimationSpecSchema.parse({ name: "P", rig: "R6", keyframes: [{ t: 0, pose: "punch" }] }));
+    expect(unsupportedJoints(r6, RIGS.R6)).toEqual([]);
+    expect(() => sanitizeAnimationSpec(AnimationSpecSchema.parse({ name: "X", rig: "R15", keyframes: [{ t: 0, from: 3 }] }))).toThrow(/No keyframe at 3s/);
+  });
+
+  it("every named pose keeps the knees and elbows bending the right way and stays on the floor", () => {
+    for (const name of POSE_NAMES) {
+      const spec = sanitizeAnimationSpec(AnimationSpecSchema.parse({ name, rig: "R15", loop: false, keyframes: [{ t: 0, pose: name }, { t: 1, pose: name }] }));
+      const issues = checkAnimation(spec).filter((l) => !(name === "jump" && /never touch/.test(l)));
+      expect(issues, name).toEqual([]);
+    }
+  });
+
+  it("rebuilds a keyframe when an edit brings a named pose", () => {
+    const base = sanitizeAnimationSpec(AnimationSpecSchema.parse({ name: "E", rig: "R15", keyframes: [{ t: 0, poses: { neck: [30, 0, 0], waist: [10, 0, 0] } }] }));
+    const { spec } = applyAnimationEdit(base, { keyframes: [{ t: 0, pose: "cheer", poses: {} }] });
+    expect(spec.keyframes[0].poses).toEqual(namedPose("cheer"));
+    const merged = applyAnimationEdit(base, { keyframes: [{ t: 0, poses: { waist: [0, 0, 0] } }] }).spec;
+    expect(merged.keyframes[0].poses).toEqual({ neck: [30, 0, 0], waist: [0, 0, 0] });
+  });
+
+  it("follow-through delays the arms and head, and keeps loops seamless", () => {
+    const loop = sanitizeAnimationSpec(AnimationSpecSchema.parse({
+      name: "Swing", rig: "R15", overlap: 0.05,
+      keyframes: [
+        { t: 0, poses: { waist: [0, 0, 0], rightShoulder: [0, 0, 0], rightElbow: [0, 0, 0] } },
+        { t: 0.5, poses: { waist: [-20, 0, 0], rightShoulder: [60, 0, 0], rightElbow: [40, 0, 0] } },
+        { t: 1, poses: { waist: [0, 0, 0], rightShoulder: [0, 0, 0], rightElbow: [0, 0, 0] } },
+      ],
+    }));
+    const baked = bakedKeyframes(loop);
+    const at = (t: number, j: string) => baked.find((k) => Math.abs(k.t - t) < 1e-6)?.poses[j as "waist"];
+    expect(at(0.5, "waist")).toEqual([-20, 0, 0]);
+    expect(at(0.55, "rightShoulder")).toEqual([60, 0, 0]);
+    expect(at(0.6, "rightElbow")).toEqual([40, 0, 0]);
+    expect(animationLength(loop)).toBe(1);
+    // The start and end match for every joint, so the loop doesn't jump.
+    const tracks = buildTracks(loop);
+    const a = sampleTracks(tracks, 0), b = sampleTracks(tracks, 1);
+    for (const j of Object.keys(a) as (keyof typeof a)[]) for (let i = 0; i < 9; i++) expect(b[j]!.rot[i]).toBeCloseTo(a[j]!.rot[i], 5);
+    expect(checkAnimation(loop)).toEqual([]);
+    // A one-shot lasts until the hands settle.
+    expect(animationLength({ ...loop, loop: false })).toBeCloseTo(1.15, 6);
+  });
+
+  it("reports joints bent the wrong way, feet in the floor and loops that jump", () => {
+    const bad = sanitizeAnimationSpec(AnimationSpecSchema.parse({
+      name: "Bad", rig: "R15",
+      keyframes: [
+        { t: 0, poses: { root: { pos: [0, -1, 0] }, rightKnee: [30, 0, 0] } },
+        { t: 1, poses: { root: { pos: [0, 0, 0] }, rightElbow: [-40, 0, 0], neck: [0, 0, 0] } },
+      ],
+    }));
+    const lines = checkAnimation(bad);
+    expect(lines[0]).toMatch(/^rightKnee bends backward \(x 30\) at 0s/);
+    expect(lines[1]).toMatch(/^rightElbow bends backward/);
+    expect(lines.some((l) => /feet go [\d.]+ studs into the floor at 0s/.test(l))).toBe(true);
+    expect(lines.some((l) => /jumps when it loops \(root/.test(l))).toBe(true);
+    expect(checkAnimation(byName("Walk Cycle"))).toEqual([]);
   });
 
   it("knows which joints a rig can't play", () => {
