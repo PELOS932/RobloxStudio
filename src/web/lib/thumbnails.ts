@@ -9,6 +9,8 @@ import { animationLength, buildTracks, poseRig, RIGS, sampleTracks, type Animati
 import { applyPose, buildRig } from "./rig3d.ts";
 import { isOneShot, oneShotLength, type VfxSpec } from "../../shared/vfx.ts";
 import { createVfx, mulberry, vfxExtent } from "./vfx3d.ts";
+import { abilityExtent, createAbilityScene, defaultView, VIEWS } from "./ability3d.ts";
+import type { ResolvedAbility } from "../../shared/ability.ts";
 
 const W = 288;
 const H = 180;
@@ -310,6 +312,71 @@ export function vfxPreview(key: string, spec: VfxSpec, frames: number): Promise<
     queue = p;
     vfxFrames.set(k, p);
     if (vfxFrames.size > 40) vfxFrames.delete(vfxFrames.keys().next().value!);
+  }
+  return p;
+}
+
+// ------------------------------------------------------------------ abilities
+
+/** Frames of an ability (the rig and its effects) from its preview camera, around its key moment. */
+function renderAbility(resolved: ResolvedAbility, frames: number): string[] {
+  const e = getEngine();
+  const rig = resolved.spec.rig;
+  const scene = createAbilityScene(resolved, rig, { loop: false, seed: 5 });
+  e.root.add(scene.group);
+  const bg = e.scene.background;
+  e.scene.background = new THREE.Color(0x15161b);
+  const { center, radius } = abilityExtent(resolved, rig);
+  const dir = VIEWS[defaultView(resolved)].clone().normalize();
+  const dist = (radius / Math.sin(THREE.MathUtils.degToRad(e.camera.fov) / 2)) * 0.95;
+  e.camera.position.copy(center).addScaledVector(dir, Math.max(8, dist));
+  e.camera.near = 0.05;
+  e.camera.far = dist * 20;
+  e.camera.updateProjectionMatrix();
+  e.camera.lookAt(center);
+  e.camera.updateMatrixWorld();
+  const out: string[] = [];
+  try {
+    // The still shows the first big moment: a projectile in flight or an effect at its peak.
+    const key = resolved.events.find((x) => x.event.travel) ?? resolved.events[resolved.events.length - 1];
+    const still = key ? Math.min(resolved.length, key.event.at + (key.event.travel ? 0.3 : 0.25)) : resolved.length / 2;
+    const times = frames === 1 ? [still] : Array.from({ length: frames }, (_, i) => (i / frames) * resolved.length);
+    for (const t of times) {
+      scene.seek(t, e.camera);
+      e.renderer.render(e.scene, e.camera);
+      out.push(e.renderer.domElement.toDataURL("image/png"));
+    }
+  } finally {
+    e.scene.background = bg;
+    e.root.remove(scene.group);
+    scene.dispose();
+  }
+  return out;
+}
+
+const abilityFrames = new Map<string, Promise<string[]>>();
+
+export function abilityPreview(key: string, resolved: ResolvedAbility, frames: number): Promise<string[]> {
+  const k = `${key}:${frames}`;
+  let p = abilityFrames.get(k);
+  if (!p) {
+    p = queue.then(
+      () =>
+        new Promise<string[]>((resolve) =>
+          setTimeout(() => {
+            let out: string[] = [];
+            try {
+              out = renderAbility(resolved, frames);
+            } catch {
+              // No WebGL.
+            }
+            resolve(out);
+          }, 0),
+        ),
+    );
+    queue = p;
+    abilityFrames.set(k, p);
+    if (abilityFrames.size > 30) abilityFrames.delete(abilityFrames.keys().next().value!);
   }
   return p;
 }

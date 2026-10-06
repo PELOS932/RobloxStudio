@@ -1,24 +1,76 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { isOneShot, oneShotLength, type VfxSpec } from "../../shared/vfx.ts";
-import { createVfx, vfxExtent, type VfxRuntime } from "../lib/vfx3d.ts";
+import { createVfx, onRealTextures, realTextureCount, vfxExtent, type VfxRuntime } from "../lib/vfx3d.ts";
+import { BACKDROPS, createStage, type Backdrop, type Stage } from "../lib/stage3d.ts";
 import { Icon } from "../lib/icons.tsx";
 
-// Live preview of a visual effect: play/pause, replay one-shots, speed, backdrop and per-emitter
-// mute, with orbit controls. Simulation runs every frame only while visible and playing.
+// Live preview of a visual effect: play/pause, replay one-shots, speed, backdrop, glow and
+// per-emitter mute, with orbit controls. Simulation runs only while playing.
 
 const SPEEDS = [0.25, 0.5, 1, 2];
-const BACKDROPS = { night: 0x0d0e12, dusk: 0x2a2f3d, day: 0x9fb6c9 } as const;
-type Backdrop = keyof typeof BACKDROPS;
+
+/** Shared by the effect and ability viewers: remembered per browser. */
+export function usePref<T extends string>(key: string, initial: T, allowed: readonly T[]): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const s = localStorage.getItem(key) as T | null;
+      return s && allowed.includes(s) ? s : initial;
+    } catch {
+      return initial;
+    }
+  });
+  return [
+    v,
+    (next: T) => {
+      setV(next);
+      try {
+        localStorage.setItem(key, next);
+      } catch {
+        // Not remembered in private mode.
+      }
+    },
+  ];
+}
+
+/** "Roblox textures" when the real built-in textures loaded from the local Studio install. */
+export function TextureBadge() {
+  const [real, setReal] = useState(realTextureCount() > 0);
+  useEffect(() => onRealTextures(() => setReal(true)), []);
+  return (
+    <span className={`vfx-tex ${real ? "real" : ""}`} title={real ? "Using Roblox's own particle textures from your Studio install" : "Roblox Studio wasn't found on this computer, so built-in particle textures are drawn as close stand-ins"}>
+      {real ? "Roblox textures" : "Stand-in textures"}
+    </span>
+  );
+}
+
+/** Cycles the stage backdrop: night, dusk, day. */
+export function BackdropButton({ value, onChange }: { value: Backdrop; onChange: (b: Backdrop) => void }) {
+  const all = Object.keys(BACKDROPS) as Backdrop[];
+  const next = all[(all.indexOf(value) + 1) % all.length];
+  return (
+    <button className="btn small backdrop-btn" title={`Backdrop: ${value} (click for ${next})`} onClick={() => onChange(next)}>
+      <i className={`backdrop-dot ${value}`} /> <span className="long">{value[0].toUpperCase() + value.slice(1)}</span>
+    </button>
+  );
+}
+
+export function GlowToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button className={`icon-btn ${on ? "active" : ""}`} title={on ? "Glow (bloom) on" : "Glow (bloom) off"} onClick={() => onChange(!on)}>
+      <Icon name="sparkles" size={14} />
+    </button>
+  );
+}
 
 export function VfxViewer({ spec }: { spec: VfxSpec }) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const engineRef = useRef<{ renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls; floor: THREE.Mesh } | null>(null);
+  const stageRef = useRef<Stage | null>(null);
   const runtimeRef = useRef<VfxRuntime | null>(null);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
-  const [backdrop, setBackdrop] = useState<Backdrop>("night");
+  const [backdrop, setBackdrop] = usePref<Backdrop>("forge.vfxBackdrop", "night", Object.keys(BACKDROPS) as Backdrop[]);
+  const [glow, setGlow] = usePref<"on" | "off">("forge.vfxGlow", "on", ["on", "off"]);
   const [muted, setMuted] = useState<Set<string>>(new Set());
   const [count, setCount] = useState(0);
   const oneShot = isOneShot(spec);
@@ -30,79 +82,37 @@ export function VfxViewer({ spec }: { spec: VfxSpec }) {
 
   useEffect(() => setMuted(new Set()), [spec]);
 
-  // Renderer, once.
   useEffect(() => {
-    const host = hostRef.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    host.appendChild(renderer.domElement);
-    const scene = new THREE.Scene();
-    scene.add(new THREE.HemisphereLight(0xbfd2ff, 0x1a1712, 0.35));
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 64), new THREE.MeshStandardMaterial({ color: 0x24262c, roughness: 0.92 }));
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
-    const grid = new THREE.PolarGridHelper(40, 16, 10, 64, 0x30323a, 0x30323a);
-    grid.position.y = 0.01;
-    scene.add(grid);
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.maxPolarAngle = Math.PI * 0.495;
-    engineRef.current = { renderer, scene, camera, controls, floor };
-    const resize = () => {
-      const w = host.clientWidth || 1, h = host.clientHeight || 1;
-      renderer.setSize(w, h, false);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    };
-    const ro = new ResizeObserver(resize);
-    ro.observe(host);
-    resize();
+    const stage = createStage(hostRef.current!);
+    stageRef.current = stage;
     return () => {
-      ro.disconnect();
-      renderer.setAnimationLoop(null);
-      controls.dispose();
-      renderer.dispose();
-      renderer.domElement.remove();
-      engineRef.current = null;
+      stage.dispose();
+      stageRef.current = null;
     };
   }, []);
 
-  // Frame the effect when it changes.
   useEffect(() => {
-    const e = engineRef.current;
-    if (!e) return;
+    const s = stageRef.current;
+    if (!s) return;
     const { center, radius } = vfxExtent(spec);
-    // Fit the bounding sphere in the narrower of the two fields of view.
-    const vfov = THREE.MathUtils.degToRad(e.camera.fov);
-    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * e.camera.aspect);
-    const dist = Math.max(8, (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.05);
-    e.controls.target.copy(center);
-    e.camera.position.copy(center).addScaledVector(new THREE.Vector3(0.55, 0.32, -1).normalize(), dist);
-    e.controls.minDistance = 2;
-    e.controls.maxDistance = dist * 4;
-    e.controls.update();
+    s.frame(center, radius, new THREE.Vector3(0.55, 0.32, -1));
   }, [spec]);
 
+  useEffect(() => stageRef.current?.setBackdrop(backdrop), [backdrop]);
   useEffect(() => {
-    const e = engineRef.current;
-    if (!e) return;
-    const c = new THREE.Color(BACKDROPS[backdrop]);
-    e.scene.background = c;
-    (e.floor.material as THREE.MeshStandardMaterial).color.set(backdrop === "day" ? 0x6f7a63 : backdrop === "dusk" ? 0x2f3240 : 0x24262c);
-  }, [backdrop]);
+    if (stageRef.current) stageRef.current.glow.enabled = glow === "on";
+  }, [glow]);
 
   // The effect itself: rebuilt when the spec or muted emitters change.
   useEffect(() => {
-    const e = engineRef.current;
-    if (!e) return;
+    const s = stageRef.current;
+    if (!s) return;
     const rt = createVfx(shown);
-    rt.warm(oneShot ? 0 : 1.5, e.camera);
-    e.scene.add(rt.object);
+    rt.warm(oneShot ? 0 : 1.5, s.camera);
+    s.scene.add(rt.object);
     runtimeRef.current = rt;
     return () => {
-      e.scene.remove(rt.object);
+      s.scene.remove(rt.object);
       rt.dispose();
       runtimeRef.current = null;
     };
@@ -110,18 +120,18 @@ export function VfxViewer({ spec }: { spec: VfxSpec }) {
 
   // Frame loop.
   useEffect(() => {
-    const e = engineRef.current;
-    if (!e) return;
+    const s = stageRef.current;
+    if (!s) return;
     let last = performance.now();
     let sinceBurst = 0;
     let shownCount = -1;
     const replayEvery = oneShotLength(spec) + 0.8;
-    e.renderer.setAnimationLoop((now) => {
+    s.renderer.setAnimationLoop((now) => {
       const dt = Math.min(0.1, (now - last) / 1000) * speed;
       last = now;
       const rt = runtimeRef.current;
       if (rt && playing) {
-        rt.update(dt, e.camera);
+        rt.update(dt, s.camera);
         sinceBurst += dt;
         // One-shots replay on their own so the preview never goes empty.
         if (hasBursts && sinceBurst > replayEvery) {
@@ -134,10 +144,9 @@ export function VfxViewer({ spec }: { spec: VfxSpec }) {
           setCount(n);
         }
       }
-      e.controls.update();
-      e.renderer.render(e.scene, e.camera);
+      s.render();
     });
-    return () => e.renderer.setAnimationLoop(null);
+    return () => s.renderer.setAnimationLoop(null);
   }, [playing, speed, spec, hasBursts]);
 
   const toggle = (name: string) =>
@@ -158,6 +167,7 @@ export function VfxViewer({ spec }: { spec: VfxSpec }) {
             {em.name}
           </button>
         ))}
+        <TextureBadge />
       </div>
       <div className="anim-bar vfx-bar">
         <button className="icon-btn anim-play" title={playing ? "Pause (space)" : "Play (space)"} onClick={() => setPlaying((p) => !p)}>
@@ -170,13 +180,8 @@ export function VfxViewer({ spec }: { spec: VfxSpec }) {
         )}
         <span className="anim-time">{count} particles</span>
         <span style={{ flex: 1 }} />
-        <div className="seg" role="group" aria-label="Backdrop">
-          {(Object.keys(BACKDROPS) as Backdrop[]).map((b) => (
-            <button key={b} className={backdrop === b ? "active" : ""} onClick={() => setBackdrop(b)}>
-              {b[0].toUpperCase() + b.slice(1)}
-            </button>
-          ))}
-        </div>
+        <GlowToggle on={glow === "on"} onChange={(v) => setGlow(v ? "on" : "off")} />
+        <BackdropButton value={backdrop} onChange={setBackdrop} />
         <select className="anim-speed" value={speed} onChange={(ev) => setSpeed(Number(ev.target.value))} title="Simulation speed">
           {SPEEDS.map((s) => (
             <option key={s} value={s}>{s}×</option>

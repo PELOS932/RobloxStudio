@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket } from "ws";
-import { HOST, PORT, ROOT, loadSettings, saveSettings } from "./config.ts";
+import { detectRobloxContent, HOST, PORT, ROOT, loadSettings, saveSettings } from "./config.ts";
 import { assets, bus, conversations, games, shortId } from "./store.ts";
 import { StudioBridge } from "./studio-bridge.ts";
 import { ForgeMcp } from "./forge-mcp.ts";
@@ -16,6 +16,7 @@ import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import { ScriptSpecSchema } from "../shared/script.ts";
 import { AnimationSpecSchema, sanitizeAnimationSpec } from "../shared/animation.ts";
 import { sanitizeVfxSpec, VfxSpecSchema } from "../shared/vfx.ts";
+import { AbilitySpecSchema, sanitizeAbilitySpec } from "../shared/ability.ts";
 import { parseAutoCompact } from "../shared/context.ts";
 import type { Asset } from "../shared/assets.ts";
 import type { BootState, ClientEvent, ServerEvent, Settings, StudioStatus } from "../shared/protocol.ts";
@@ -162,7 +163,10 @@ api.post("/assets", (req, res) => {
   } else if (kind === "vfx") {
     const s = sanitizeVfxSpec(VfxSpecSchema.parse(spec));
     asset = { ...base, id: prev?.id ?? shortId("v_"), kind, name: s.name, spec: s, ...(s.description ? { description: s.description } : {}) };
-  } else return void res.status(400).json({ error: "kind must be model, ui, animation or vfx" });
+  } else if (kind === "ability") {
+    const s = sanitizeAbilitySpec(AbilitySpecSchema.parse(spec));
+    asset = { ...base, id: prev?.id ?? shortId("b_"), kind, name: s.name, spec: s, ...(s.description ? { description: s.description } : {}) };
+  } else return void res.status(400).json({ error: "kind must be model, ui, animation, vfx or ability" });
   res.json(assets.put(asset, true));
 });
 
@@ -209,6 +213,20 @@ api.put("/assets/:id/thumb", (req, res) => {
   res.json({ ok: assets.putThumb(String(req.params.id), Number(req.body?.version), Buffer.from(m[1], "base64")) });
 });
 
+/**
+ * Built-in Roblox textures from the local Studio install (rbxasset://textures/…), so effect
+ * previews use the real particle textures. Only files under textures/ are served.
+ */
+let robloxContent: string | null | undefined;
+api.get("/rbxasset/*path", (req, res) => {
+  if (robloxContent === undefined) robloxContent = detectRobloxContent();
+  const segs = ([] as string[]).concat((req.params as { path: string | string[] }).path);
+  if (!robloxContent || segs[0] !== "textures" || segs.some((s) => !/^[\w.-]+$/.test(s) || s.startsWith("."))) return void res.status(404).end();
+  const file = join(robloxContent, ...segs);
+  if (!existsSync(file)) return void res.status(404).end();
+  res.set("Cache-Control", "private, max-age=86400").type("application/octet-stream").sendFile(file);
+});
+
 /** Add the bundled starter animations (idle, wave, walk, jump, sword slash) to the library. */
 api.post("/animations/starters", (_req, res) => {
   const list = JSON.parse(readFileSync(join(ROOT, "examples", "starter-animations.json"), "utf8")) as unknown[];
@@ -232,6 +250,21 @@ api.post("/vfx/starters", (_req, res) => {
     const spec = sanitizeVfxSpec(VfxSpecSchema.parse(raw));
     const asset: Asset = {
       id: shortId("v_"), kind: "vfx", name: spec.name, spec, createdAt: now + i, updatedAt: now + i, version: 1, origin: "user",
+      ...(spec.description ? { description: spec.description } : {}), ...(games.currentId ? { gameId: games.currentId } : {}),
+    };
+    return assets.put(asset, false).id;
+  });
+  res.json({ ids: created });
+});
+
+/** Add the bundled starter abilities (fireball, lightning strike, healing aura…) to the library. */
+api.post("/abilities/starters", (_req, res) => {
+  const list = JSON.parse(readFileSync(join(ROOT, "examples", "starter-abilities.json"), "utf8")) as unknown[];
+  const now = Date.now();
+  const created = list.map((raw, i) => {
+    const spec = sanitizeAbilitySpec(AbilitySpecSchema.parse(raw));
+    const asset: Asset = {
+      id: shortId("b_"), kind: "ability", name: spec.name, spec, createdAt: now + i, updatedAt: now + i, version: 1, origin: "user",
       ...(spec.description ? { description: spec.description } : {}), ...(games.currentId ? { gameId: games.currentId } : {}),
     };
     return assets.put(asset, false).id;

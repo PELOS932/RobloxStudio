@@ -57,9 +57,9 @@ describe("token and payload budgets", () => {
   it("keeps the advertised tool list small without dropping required fields", () => {
     const list = forge.toolList;
     const json = JSON.stringify(list);
-    // ~7.4k tokens for 30 tools (models, UIs, animations, effects, scripts and the Studio power
-    // tools), served from the prompt cache after the first turn.
-    expect(json.length).toBeLessThan(30_000);
+    // ~8k tokens for 33 tools (models, UIs, animations, effects, abilities, scripts and the Studio
+    // power tools), served from the prompt cache after the first turn.
+    expect(json.length).toBeLessThan(33_000);
     expect(json).not.toMatch(/"pattern":"/); // regex constraints are stripped (a property may be named pattern)
     expect(json).not.toContain("9007199254740991");
     const tool = (n: string) => list.find((t) => t.name === n)!.inputSchema;

@@ -6,7 +6,7 @@ import type {
 } from "../shared/protocol.ts";
 
 export type RightTab = "preview" | "assets" | "place" | "studio";
-export type LibraryTab = "models" | "animations" | "vfx";
+export type LibraryTab = "models" | "animations" | "vfx" | "abilities";
 export type MobileView = "chats" | "chat" | "panel";
 
 export interface Toast {
@@ -43,6 +43,8 @@ interface State {
   animationId: string | null;
   /** Effect shown in Library > VFX. */
   vfxId: string | null;
+  /** Ability shown in Library > Abilities. */
+  abilityId: string | null;
   /** A reply finished while the tab was in the background (shown in the tab title). */
   unseenDone: boolean;
   lastError: Record<string, string | undefined>;
@@ -84,6 +86,7 @@ export const useStore = create<State>(() => ({
   libraryTab: savedLibraryTab(),
   animationId: null,
   vfxId: null,
+  abilityId: null,
   unseenDone: false,
   lastError: {},
   assets: [],
@@ -354,6 +357,7 @@ export async function loadAsset(id: string): Promise<Asset | null> {
 function focusFor(id: string, kind: AssetSummary["kind"] | undefined): Partial<State> {
   if (kind === "animation") return { activeAssetId: id, animationId: id, rightTab: "assets", libraryTab: rememberLibraryTab("animations") };
   if (kind === "vfx") return { activeAssetId: id, vfxId: id, rightTab: "assets", libraryTab: rememberLibraryTab("vfx") };
+  if (kind === "ability") return { activeAssetId: id, abilityId: id, rightTab: "assets", libraryTab: rememberLibraryTab("abilities") };
   return { activeAssetId: id, rightTab: "preview" };
 }
 
@@ -364,7 +368,7 @@ export function openAsset(id: string) {
 function savedLibraryTab(): LibraryTab {
   try {
     const t = localStorage.getItem("forge.libraryTab");
-    return t === "animations" || t === "vfx" ? t : "models";
+    return t === "animations" || t === "vfx" || t === "abilities" ? t : "models";
   } catch {
     return "models";
   }

@@ -178,6 +178,22 @@ for await (const line of createInterface({ input: process.stdin })) {
     const animId = res.content[0].text.match(/\b(a_[a-z0-9]{6})\b/)?.[1];
     await toolCall("edit_animation", { id: animId, speed: 2, keyframes: [{ t: 0.5, poses: { neck: [0, 20, 0] } }] });
     streamText("Done.");
+  } else if (/power/i.test(prompt)) {
+    // An ability that reuses a library effect, then a tweak to it.
+    streamText("Making a fire punch.");
+    const fx = await toolCall("create_vfx", { name: "Fist Flame", emitters: [{ name: "Flame", type: "particles", texture: "fire", color: ["#ffd36b", "#ff5a1f"], size: [1, 0.2], lifetime: 0.3, rate: 60, speed: 1, spread: 180, lightEmission: 1 }] });
+    const fxId = fx.content[0].text.match(/\b(v_[a-z0-9]{6})\b/)?.[1];
+    const res = await toolCall("create_ability", {
+      name: "Fire Punch", rig: "R15",
+      animation: { keyframes: [{ t: 0, poses: { rightShoulder: [0, 0, 0] } }, { t: 0.3, ease: "cubic", poses: { rightShoulder: [90, 0, 0] } }, { t: 0.8, poses: { rightShoulder: [0, 0, 0] } }], loop: false },
+      events: [
+        { name: "Fist", at: 0, vfx: fxId, attach: "rightHand", duration: 0.35 },
+        { name: "Blast", at: 0.3, attach: "rightHand", duration: 0.5, travel: { velocity: [0, 0, -40] }, vfx: { emitters: [{ name: "Core", type: "particles", texture: "glow", color: "#ffb347", size: 1.5, lifetime: 0.1, rate: 60, speed: 0, lightEmission: 1, locked: true }] }, impact: { emitters: [{ name: "Pop", type: "particles", texture: "spark", burst: 20, speed: [10, 20], spread: 180, lifetime: 0.4 }] } },
+      ],
+    });
+    const abilityId = res.content[0].text.match(/\b(b_[a-z0-9]{6})\b/)?.[1];
+    await toolCall("edit_ability", { id: abilityId, update: [{ index: 1, duration: 0.6 }], cooldown: 2 });
+    streamText("Done.");
   } else if (/effect/i.test(prompt)) {
     // Effects, scripts and the Studio power tools, the way Claude would chain them.
     streamText("Making a portal effect and wiring it up.");

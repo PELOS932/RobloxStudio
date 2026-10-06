@@ -16,6 +16,8 @@ import type { ScriptSpec } from "./script.ts";
 import { animationLength, jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type PoseValue, type Rig } from "./animation.ts";
 import { vfxSummary, vfxTree, type VfxSpec } from "./vfx.ts";
 import { treeToLuau } from "./instance-tree.ts";
+import { abilityTrees } from "./ability-studio.ts";
+import type { ResolvedAbility } from "./ability.ts";
 
 export interface ImportOptions {
   assetId?: string;
@@ -898,6 +900,60 @@ local ok, result = pcall(function()
 	end
 	pcall(function() game:GetService("Selection"):Set(made) end)
 	return { ok = true, scripts = out }
+end)
+return forgeFinish(ok, result)
+`;
+  return { code };
+}
+
+// ---------------------------------------------------------------------------
+// Abilities: ReplicatedStorage.Abilities.<Name> (animation, effect templates, Play module) plus a
+// Tool in StarterPack that casts it, so it can be tried right away in a play-test.
+
+export function abilityToLuau(r: ResolvedAbility, opts: ImportOptions = {}): LuauResult {
+  const { folder, tool } = abilityTrees(r);
+  const { code: build, rootVars } = treeToLuau([folder, tool]);
+  const code = `${header("ability", r.spec.name, ` · ${r.spec.rig} · ${r.events.length} effects`, opts, `Forge: import ${r.spec.name}`)}
+local NAME = ${luaString(r.spec.name)}
+local REPLACE = ${opts.replace ?? true}
+local SELECT = ${opts.select ?? true}
+${RUNTIME}
+local ok, result = pcall(function()
+	-- (Not indented: the build code holds script sources in long strings.)
+${build}
+	local folder, tool = ${rootVars[0]}, ${rootVars[1]}
+	local storage = game:GetService("ReplicatedStorage")
+	local abilities = storage:FindFirstChild("Abilities")
+	if not abilities then
+		abilities = Instance.new("Folder")
+		abilities.Name = "Abilities"
+		abilities.Parent = storage
+	end
+	local previous = if REPLACE then (forgeFindPrevious(abilities, FORGE_ASSET_ID) or abilities:FindFirstChild(NAME)) else nil
+	if previous then
+		-- Keep a published animation id as long as the animation itself didn't change.
+		if previous:GetAttribute("AnimationHash") == folder:GetAttribute("AnimationHash") then
+			folder:SetAttribute("AnimationId", previous:GetAttribute("AnimationId") or "")
+		end
+		previous.Parent = nil
+	end
+	local pack = game:GetService("StarterPack")
+	local oldTool = if REPLACE then (forgeFindPrevious(pack, FORGE_ASSET_ID) or pack:FindFirstChild(NAME)) else nil
+	if oldTool then oldTool.Parent = nil end
+	if FORGE_ASSET_ID then
+		for _, inst in { folder, tool } do
+			inst:SetAttribute("ForgeAssetId", FORGE_ASSET_ID)
+			inst:SetAttribute("ForgeVersion", FORGE_VERSION)
+		end
+	end
+	folder.Parent = abilities
+	tool.Parent = pack
+	if SELECT then
+		pcall(function() game:GetService("Selection"):Set({ folder }) end)
+	end
+	local effects = folder:FindFirstChild("Effects")
+	local animation = folder:FindFirstChild("Animation")
+	return { ok = true, kind = "ability", path = folder:GetFullName(), tool = tool:GetFullName(), effects = if effects then #effects:GetChildren() else 0, keyframes = if animation then #animation:GetChildren() else 0, replaced = previous ~= nil }
 end)
 return forgeFinish(ok, result)
 `;

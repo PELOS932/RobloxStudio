@@ -95,6 +95,14 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
     case "create_script": return count(input.scripts)
       ? { label: "Write scripts", args: (input.scripts as { name?: string }[]).map((x) => x.name).filter(Boolean).join(", ") }
       : { label: "Write script", args: [field("name"), input.kind, input.parent].filter(Boolean).join(" · ") };
+    case "create_ability": return { label: "Create ability", args: [field("name"), input.rig, count(input.events) ? plural(count(input.events), "effect") : ""].filter(Boolean).join(" · ") };
+    case "edit_ability": {
+      const bits = [asset(field("id"))];
+      if (count(input.add)) bits.push(`+${count(input.add)}`);
+      if (count(input.update)) bits.push(`~${count(input.update)}`);
+      if (count(input.remove)) bits.push(`−${count(input.remove)}`);
+      return { label: "Edit ability", args: bits.filter(Boolean).join(" ") };
+    }
     case "create_vfx": return { label: "Create effect", args: [field("name"), count(input.emitters) ? plural(count(input.emitters), "emitter") : ""].filter(Boolean).join(" · ") };
     case "edit_vfx": {
       const bits = [asset(field("id"))];

@@ -4042,3 +4042,90 @@ a.btn { text-decoration: none; }
 .thumb-vfx {
   background: #15161b;
 }
+
+/* Abilities and effects on a character ------------------------------------------ */
+.vfx-char {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.vfx-char .btn.active {
+  background: var(--elev-2);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.select-sm {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  max-width: 150px;
+}
+.ability-desc {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  flex: none;
+}
+.anim-key.ability-key {
+  background: #f5a524;
+}
+.anim-key.ability-key.travel {
+  background: #ff6b2c;
+}
+.vfx-tex {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: rgba(17, 17, 19, 0.82);
+  color: var(--text-faint);
+  font: 11px var(--mono);
+  margin-left: auto;
+}
+.vfx-tex.real {
+  color: #8fd19e;
+}
+.vfx-tex.warn {
+  color: var(--warning);
+  margin-left: 4px;
+}
+.ability-rig {
+  pointer-events: auto;
+  background: rgba(17, 17, 19, 0.82);
+}
+@container panel (max-width: 620px) {
+  .vfx-char .long {
+    display: none;
+  }
+  .vfx-tex {
+    display: none;
+  }
+}
+.backdrop-btn {
+  gap: 6px;
+}
+.backdrop-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+.backdrop-dot.night { background: #0d0e12; }
+.backdrop-dot.dusk { background: #2a2f3d; }
+.backdrop-dot.day { background: #9fb6c9; }
+.anim-bar .backdrop-btn .long {
+  font-size: 11px;
+}
+@container panel (max-width: 620px) {
+  .anim-bar .backdrop-btn .long {
+    display: none;
+  }
+}

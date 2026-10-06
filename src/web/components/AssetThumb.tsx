@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadAsset, useStore } from "../store.ts";
 import { KindIcon } from "../lib/icons.tsx";
-import { animationPreview, modelThumbnail, modelTurntable, uploadThumbnail, vfxPreview } from "../lib/thumbnails.ts";
+import { abilityPreview, animationPreview, modelThumbnail, modelTurntable, uploadThumbnail, vfxPreview } from "../lib/thumbnails.ts";
+import { useResolvedAbility } from "../lib/use-ability.ts";
+import type { AbilitySpec } from "../../shared/ability.ts";
 import type { AnimationSpec } from "../../shared/animation.ts";
 import type { VfxSpec } from "../../shared/vfx.ts";
 import { UiScreen } from "./UiPreview.tsx";
@@ -18,7 +20,7 @@ import type { UiSpec } from "../../shared/ui.ts";
 export function AssetThumb({ id, kind, version, width, height, thumb, spin = false }: {
   id: string; kind: AssetKind; version: number; width: number | string; height: number | string; thumb?: number; spin?: boolean;
 }) {
-  const cached = (kind === "model" || kind === "animation" || kind === "vfx") && thumb === version;
+  const cached = (kind === "model" || kind === "animation" || kind === "vfx" || kind === "ability") && thumb === version;
   const needSpec = !cached || spin;
   const asset = useStore((s) => s.assetCache[id]);
   const current = asset && asset.version === version ? asset : undefined;
@@ -52,6 +54,9 @@ export function AssetThumb({ id, kind, version, width, height, thumb, spin = fal
     if (spin && current?.kind === "vfx") body = <FramesPlay key={`${id}:${version}`} load={() => vfxPreview(`${id}:${version}`, current.spec, 24)} fps={12} still={still} />;
     else if (still) body = still;
     else if (current?.kind === "vfx") body = <VfxStill key={`${id}:${version}`} id={id} version={version} spec={current.spec} />;
+  } else if (kind === "ability") {
+    if (current?.kind === "ability" && (spin || !still)) body = <AbilityThumb key={`${id}:${version}:${spin}`} id={id} version={version} spec={current.spec} spin={spin} still={still} />;
+    else if (still) body = still;
   } else if (current?.kind === "ui") {
     body = <UiMini spec={current.spec} w={current.html?.width ?? 1280} h={current.html?.height ?? 720} box={box} />;
   } else if (current?.kind === "script") body = <CodeMini source={current.spec.source} />;
@@ -155,6 +160,27 @@ function VfxStill({ id, version, spec }: { id: string; version: number; spec: Vf
   }, [id, version, spec]);
   if (url === null) return <span className="thumb-loading" />;
   if (!url) return <KindIcon kind="vfx" size={18} />;
+  return <img src={url} alt="" draggable={false} />;
+}
+
+function AbilityThumb({ id, version, spec, spin, still }: { id: string; version: number; spec: AbilitySpec; spin: boolean; still: React.ReactNode }) {
+  const resolved = useResolvedAbility(spec);
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!resolved || spin) return;
+    let alive = true;
+    void abilityPreview(`${id}:${version}`, resolved, 1).then(([u = ""]) => {
+      if (!alive) return;
+      setUrl(u);
+      if (!resolved.missing.length) uploadThumbnail(id, version, u);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [id, version, resolved, spin]);
+  if (spin && resolved) return <FramesPlay load={() => abilityPreview(`${id}:${version}`, resolved, 24)} fps={24 / Math.max(0.5, resolved.length)} still={still} />;
+  if (url === null) return <span className="thumb-loading" />;
+  if (!url) return <KindIcon kind="ability" size={18} />;
   return <img src={url} alt="" draggable={false} />;
 }
 

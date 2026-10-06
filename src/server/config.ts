@@ -60,6 +60,35 @@ export function detectStudioCommand(): { command: string; args: string[] } | nul
   return null;
 }
 
+/**
+ * Roblox Studio's content folder (built-in textures such as textures/particles/fire_main.dds),
+ * so previews can use the real textures. FORGE_ROBLOX_CONTENT overrides the search.
+ */
+export function detectRobloxContent(): string | null {
+  const override = process.env.FORGE_ROBLOX_CONTENT;
+  if (override) return existsSync(override) ? override : null;
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
+    const versions = join(local, "Roblox", "Versions");
+    try {
+      candidates.push(
+        ...readdirSync(versions)
+          .filter((d) => d.startsWith("version-"))
+          .map((d) => join(versions, d))
+          .filter((d) => existsSync(join(d, "RobloxStudioBeta.exe")) || existsSync(join(d, "StudioMCP.exe")))
+          .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+          .map((d) => join(d, "content")),
+      );
+    } catch {
+      // No Versions folder.
+    }
+  } else if (process.platform === "darwin") {
+    candidates.push("/Applications/RobloxStudio.app/Contents/Resources/content", join(homedir(), "Applications/RobloxStudio.app/Contents/Resources/content"));
+  }
+  return candidates.find((c) => existsSync(join(c, "textures"))) ?? null;
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   model: "claude-opus-5-5",
   effort: "default",

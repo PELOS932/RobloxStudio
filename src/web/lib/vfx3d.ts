@@ -4,9 +4,10 @@
 // spread cones, shapes, acceleration, drag (half-life), rotation and spin, LightEmission blending,
 // orientation modes, squash, flipbooks, locked particles and one-shot bursts.
 import * as THREE from "three";
+import { decodeDds } from "../../shared/dds.ts";
 import {
   colorKeys, DIRECTIONS, FIRE_DEFAULTS, isOneShot, numberKeys, PARTICLE_DEFAULTS, previewMotion, rangeOf, sampleColor, sampleNumber,
-  SMOKE_DEFAULTS, SPARKLES_DEFAULT, texturePreset, type ColorKey, type NumKey, type TexturePreset, type VfxBeam,
+  SMOKE_DEFAULTS, SPARKLES_DEFAULT, texturePreset, textureUrl, type ColorKey, type NumKey, type TexturePreset, type VfxBeam,
   type VfxParticles, type VfxSpec, type VfxTrail,
 } from "../../shared/vfx.ts";
 
@@ -124,6 +125,69 @@ export function particleTexture(preset: TexturePreset): THREE.Texture {
 }
 
 // ---------------------------------------------------------------------------
+// The real textures, when they can be had: Roblox's built-in particle textures from the local
+// Studio install (served by the app from Studio's content folder) and rbxassetid images through
+// Roblox's thumbnail service. Until (or unless) they load, the procedural stand-ins are shown;
+// the texture object is updated in place, so materials pick the real one up by themselves.
+
+const loaded = new Map<string, THREE.Texture>();
+let realCount = 0;
+const realListeners = new Set<() => void>();
+
+/** How many real Roblox textures are in use (0 = only stand-ins). */
+export function realTextureCount() {
+  return realCount;
+}
+export function onRealTextures(fn: () => void): () => void {
+  realListeners.add(fn);
+  return () => realListeners.delete(fn);
+}
+
+function paint(tex: THREE.Texture, width: number, height: number, draw: (g: CanvasRenderingContext2D) => void) {
+  const c = document.createElement("canvas");
+  c.width = width;
+  c.height = height;
+  draw(c.getContext("2d")!);
+  tex.image = c;
+  tex.needsUpdate = true;
+  realCount++;
+  for (const fn of realListeners) fn();
+}
+
+export function textureFor(texture: string | undefined): THREE.Texture {
+  const key = texture ?? "sparkle";
+  const hit = loaded.get(key);
+  if (hit) return hit;
+  const preset = texturePreset(texture);
+  // A copy of the stand-in, so the shared stand-in is never replaced.
+  const base = particleTexture(preset);
+  const tex = new THREE.CanvasTexture(base.image as HTMLCanvasElement);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  loaded.set(key, tex);
+  if (typeof fetch === "undefined" || typeof document === "undefined") return tex;
+  const url = textureUrl(texture);
+  const asset = url.match(/^rbxassetid:\/\/(\d+)/)?.[1];
+  const builtin = url.match(/^rbxasset:\/\/(textures\/[\w/.-]+\.dds)$/)?.[1];
+  if (builtin) {
+    void fetch(`/api/rbxasset/${builtin}`)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((buf) => {
+        const img = decodeDds(buf);
+        paint(tex, img.width, img.height, (g) => g.putImageData(new ImageData(img.data, img.width, img.height), 0, 0));
+      })
+      .catch(() => undefined);
+  } else if (asset) {
+    void fetch(`/api/thumb/${asset}`)
+      .then((r) => (r.ok && r.headers.get("content-type")?.startsWith("image/") ? r.blob() : Promise.reject(new Error(String(r.status)))))
+      .then((blob) => createImageBitmap(blob))
+      .then((bmp) => paint(tex, bmp.width, bmp.height, (g) => g.drawImage(bmp, 0, 0)))
+      .catch(() => undefined);
+  }
+  return tex;
+}
+
+// ---------------------------------------------------------------------------
 // Shaders
 
 const QUAD_VERT = /* glsl */ `
@@ -227,13 +291,17 @@ interface Sim {
   count(): number;
   /** Grow box by what is on screen right now. */
   extend(box: THREE.Box3): void;
+  /** Stop emitting (what is already out fades on its own). */
+  stop(): void;
+  /** Still emitting continuously (until stopped). */
+  continuous(): boolean;
   objects: THREE.Object3D[];
   dispose(): void;
 }
 
 interface ParticleConfig {
   pos: THREE.Vector3;
-  texture: TexturePreset;
+  texture: string;
   color: ColorKey[];
   size: NumKey[];
   transparency: NumKey[];
@@ -270,7 +338,7 @@ function particleConfig(e: VfxParticles): ParticleConfig {
   const spread = e.spread === undefined ? [0, 0] : typeof e.spread === "number" ? [e.spread, e.spread] : e.spread;
   return {
     pos: new THREE.Vector3(...((e.pos ?? [0, 0, 0]) as [number, number, number])),
-    texture: texturePreset(e.texture),
+    texture: e.texture ?? "sparkle",
     color: colorKeys(e.color, PARTICLE_DEFAULTS.color),
     size: numberKeys(e.size, PARTICLE_DEFAULTS.size),
     transparency: numberKeys(e.transparency, PARTICLE_DEFAULTS.transparency),
@@ -391,13 +459,14 @@ function particleSim(cfg: ParticleConfig, rng: Rng): Sim {
   };
   const aPos = attr("iPos", 3), aSize = attr("iSize", 2), aRot = attr("iRot", 1), aColor = attr("iColor", 4), aAxis = attr("iAxis", 3), aFrame = attr("iFrame", 1);
   geo.instanceCount = 0;
-  const mat = blended({ uTex: { value: particleTexture(cfg.texture) }, uEmission: { value: cfg.emission }, uMode: { value: cfg.mode }, uGrid: { value: cfg.grid } }, QUAD_VERT);
+  const mat = blended({ uTex: { value: textureFor(cfg.texture) }, uEmission: { value: cfg.emission }, uMode: { value: cfg.mode }, uGrid: { value: cfg.grid } }, QUAD_VERT);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = cfg.emission >= 0.5 ? 2 : 1;
 
   let carry = 0;
   let bursts: number[] = [];
+  let stopped = false;
   const origin = new THREE.Vector3();
   const rootRot = new THREE.Quaternion();
   const spawnDir = new THREE.Vector3();
@@ -485,12 +554,17 @@ function particleSim(cfg: ParticleConfig, rng: Rng): Sim {
       }
     },
     burst: () => {
-      if (cfg.burst > 0 && cfg.enabled) bursts.push(cfg.delay);
+      if (cfg.burst > 0 && cfg.enabled && !stopped) bursts.push(cfg.delay);
     },
+    stop: () => {
+      stopped = true;
+      bursts = [];
+    },
+    continuous: () => !stopped && cfg.enabled && cfg.rate > 0,
     update(dtRaw, rootM, camera) {
       const dt = dtRaw * cfg.timeScale;
       // Emit
-      if (cfg.enabled && cfg.rate > 0) {
+      if (cfg.enabled && !stopped && cfg.rate > 0) {
         carry += cfg.rate * dt;
         while (carry >= 1) {
           spawn(rootM);
@@ -589,7 +663,7 @@ function sampleEnvelope(keys: NumKey[], t: number): number {
 
 function stripMaterial(texture: string | undefined, emission: number): THREE.ShaderMaterial {
   return blended({
-    uTex: { value: texture ? particleTexture(texturePreset(texture)) : white() },
+    uTex: { value: texture ? textureFor(texture) : white() },
     uEmission: { value: emission },
     uScroll: { value: 0 },
   }, STRIP_VERT);
@@ -627,16 +701,24 @@ function beamSim(e: VfxBeam): Sim {
   const rgb: [number, number, number] = [0, 0, 0];
   let scroll = 0;
   const brightness = e.brightness ?? 1;
+  // After stop() the beam fades out over 0.2 s.
+  let fade = 1;
+  let stopped = false;
   return {
     objects: [mesh],
-    count: () => 0,
+    count: () => (stopped && fade > 0 ? 1 : 0),
     burst: () => undefined,
+    stop: () => {
+      stopped = true;
+    },
+    continuous: () => !stopped && e.enabled !== false,
     extend(box) {
       geo.computeBoundingBox();
       if (geo.boundingBox && mesh.visible) box.union(geo.boundingBox);
     },
     update(dt, rootM, camera) {
-      mesh.visible = e.enabled !== false;
+      if (stopped) fade = Math.max(0, fade - dt / 0.2);
+      mesh.visible = e.enabled !== false && fade > 0;
       const p0 = from.clone().applyMatrix4(rootM), p3 = to.clone().applyMatrix4(rootM);
       // Attachments point their X axis up: curves bend along the root's up axis.
       const up = new THREE.Vector3(0, 1, 0).transformDirection(rootM);
@@ -663,7 +745,7 @@ function beamSim(e: VfxBeam): Sim {
         ua.setXY(i * 2, u, 1);
         ua.setXY(i * 2 + 1, u, 0);
         sampleColor(color, t, rgb);
-        const a = 1 - Math.min(1, Math.max(0, sampleNumber(transparency, t)));
+        const a = (1 - Math.min(1, Math.max(0, sampleNumber(transparency, t)))) * fade;
         for (const k of [i * 2, i * 2 + 1]) ca.setXYZW(k, (rgb[0] / 255) * brightness, (rgb[1] / 255) * brightness, (rgb[2] / 255) * brightness, a);
       }
       pa.needsUpdate = ua.needsUpdate = ca.needsUpdate = true;
@@ -690,18 +772,23 @@ function trailSim(e: VfxTrail): Sim {
   const a1 = new THREE.Vector3(...(e.to as [number, number, number]));
   const samples: { a: THREE.Vector3; b: THREE.Vector3; t: number }[] = [];
   let clock = 0;
+  let stopped = false;
   const rgb: [number, number, number] = [0, 0, 0];
   const brightness = e.brightness ?? 1;
   return {
     objects: [mesh],
     count: () => samples.length,
     burst: () => undefined,
+    stop: () => {
+      stopped = true;
+    },
+    continuous: () => !stopped && e.enabled !== false,
     extend(box) {
       for (const smp of samples) box.expandByPoint(smp.a).expandByPoint(smp.b);
     },
     update(dt, rootM) {
       clock += dt;
-      if (e.enabled !== false) {
+      if (e.enabled !== false && !stopped) {
         samples.unshift({ a: a0.clone().applyMatrix4(rootM), b: a1.clone().applyMatrix4(rootM), t: clock });
         if (samples.length > MAX) samples.length = MAX;
       }
@@ -755,7 +842,18 @@ export interface VfxRuntime {
   particles(): number;
   /** What the effect covers right now (particles, beams, trails, lights). */
   bounds(): THREE.Box3;
+  /** With `external`: where the effect's root is (world transform). */
+  setRoot(m: THREE.Matrix4): void;
+  /** Stop emitting; particles already out live on, lights and beams fade. */
+  stop(): void;
+  /** Anything left to show (false once stopped and everything has faded, or a one-shot is over). */
+  alive(): boolean;
   dispose(): void;
+}
+
+export interface VfxOptions {
+  /** The caller places the root each frame with setRoot (abilities); no preview motion, no auto burst. */
+  external?: boolean;
 }
 
 /** Seeded random numbers (stable thumbnails). */
@@ -770,10 +868,10 @@ export function mulberry(seed: number): Rng {
   };
 }
 
-export function createVfx(spec: VfxSpec, rng: Rng = Math.random): VfxRuntime {
+export function createVfx(spec: VfxSpec, rng: Rng = Math.random, opts: VfxOptions = {}): VfxRuntime {
   const object = new THREE.Group();
   const sims: Sim[] = [];
-  const lights: { light: THREE.Light; pos: THREE.Vector3; dir: THREE.Vector3 }[] = [];
+  const lights: { light: THREE.Light; pos: THREE.Vector3; dir: THREE.Vector3; intensity: number }[] = [];
   for (const e of spec.emitters) {
     if (e.type === "particles") sims.push(particleSim(particleConfig(e), rng));
     else if (e.type === "beam") sims.push(beamSim(e));
@@ -789,6 +887,7 @@ export function createVfx(spec: VfxSpec, rng: Rng = Math.random): VfxRuntime {
         light,
         pos: new THREE.Vector3(...((e.pos ?? [0, 0, 0]) as [number, number, number])),
         dir: new THREE.Vector3(...DIRECTIONS[e.face ?? "down"]),
+        intensity: light.intensity,
       });
       object.add(light);
     }
@@ -796,10 +895,13 @@ export function createVfx(spec: VfxSpec, rng: Rng = Math.random): VfxRuntime {
   for (const { cfg } of legacyConfigs(spec)) sims.push(particleSim(cfg, rng));
   for (const s of sims) for (const o of s.objects) object.add(o);
 
-  const motion = previewMotion(spec);
+  const motion = opts.external ? "none" : previewMotion(spec);
   let time = 0;
+  let stopped = false;
+  let lightFade = 1;
   const rootM = new THREE.Matrix4();
   const place = () => {
+    if (opts.external) return;
     if (motion === "orbit") rootM.makeTranslation(Math.cos(time * 2.4) * 4, 0, Math.sin(time * 2.4) * 4);
     else if (motion === "line") rootM.makeTranslation(Math.sin(time * 1.6) * 8, 0, 0);
     else if (motion === "swing") {
@@ -814,7 +916,9 @@ export function createVfx(spec: VfxSpec, rng: Rng = Math.random): VfxRuntime {
     time += dt;
     place();
     for (const s of sims) s.update(dt, rootM, camera, time);
+    if (stopped) lightFade = Math.max(0, lightFade - dt / 0.25);
     for (const l of lights) {
+      l.light.intensity = l.intensity * lightFade;
       l.light.position.copy(l.pos).applyMatrix4(rootM);
       if (l.light instanceof THREE.SpotLight) l.light.target.position.copy(l.light.position).addScaledVector(tmpV.copy(l.dir).transformDirection(rootM), 10);
     }
@@ -833,12 +937,24 @@ export function createVfx(spec: VfxSpec, rng: Rng = Math.random): VfxRuntime {
       for (const l of lights) box.expandByPoint(l.light.position);
       return box;
     },
+    setRoot(m) {
+      rootM.copy(m);
+    },
+    stop() {
+      stopped = true;
+      for (const s of sims) s.stop();
+    },
+    alive() {
+      if (sims.some((s) => s.count() > 0 || s.continuous())) return true;
+      // Lights shine until the effect is stopped, then fade.
+      return lights.length > 0 && (!stopped || lightFade > 0);
+    },
     dispose() {
       for (const s of sims) s.dispose();
       for (const l of lights) l.light.dispose();
     },
   };
-  runtime.burst();
+  if (!opts.external) runtime.burst();
   return runtime;
 }
 

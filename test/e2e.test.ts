@@ -219,6 +219,35 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(rbxmx).toContain('<Item class="ModuleScript"');
   });
 
+  it("makes an ability from a library effect and an inline projectile, and puts a castable Tool in Studio", async () => {
+    await waitFor("studio", (e) => e.status.state === "connected" && !!e.status.studioId);
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "Make a fire power" }));
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && events.some((x) => x.type === "message" && x.convId === conv.id && x.message.blocks.some((b) => b.type === "text" && b.text === "Done.")), 60_000);
+    const last = (await api(`/api/conversations/${conv.id}`)).body.messages.at(-1);
+    const results = last.blocks.filter((b: { type: string }) => b.type === "tool").map((b: { result?: { text: string } }) => b.result?.text ?? "");
+    expect(results[1]).toMatch(/^Created ability "Fire Punch" \(id b_\w{6}, v1, 2 effects, R15, [\d.]+s\)/);
+    expect(results[1]).toMatch(/Imported in Studio at ReplicatedStorage\.Abilities\.Fire Punch/);
+    expect(results[2]).toMatch(/^Edited ability "Fire Punch".*v2/);
+    const ability = (await api("/api/state")).body.assets.find((a: { kind: string }) => a.kind === "ability");
+    expect(ability).toMatchObject({ name: "Fire Punch", version: 2, detail: "R15 · 2 effects" });
+    const full = (await api(`/api/assets/${ability.id}`)).body;
+    expect(full.spec.events[1]).toMatchObject({ name: "Blast", duration: 0.6 });
+    expect(full.spec.cooldown).toBe(2);
+    // In the (mock) place: the folder with its animation, both effect templates and the impact, plus the Tool.
+    const check = (await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: 'local f = game:GetService("ReplicatedStorage").Abilities["Fire Punch"] local names = {} for _, e in f.Effects:GetChildren() do table.insert(names, e.Name) end table.sort(names) return #f.Animation:GetChildren() .. " " .. table.concat(names, ",") .. " " .. game:GetService("StarterPack")["Fire Punch"].ClassName' }) })).body;
+    expect(check).toMatchObject({ ok: true, output: "3 Blast,Blast Impact,Fist Tool" });
+
+    const starters = (await api("/api/abilities/starters", { method: "POST" })).body;
+    expect(starters.ids).toHaveLength(6);
+    const rbxmx = await (await fetch(`${BASE}/api/assets/${starters.ids[0]}/export?format=rbxmx`)).text();
+    expect(rbxmx).toMatch(/^<roblox version="4">\n<Item class="Tool"/);
+    expect(rbxmx).toContain('<Item class="KeyframeSequence"');
+    // Only Studio's texture folder is served, and only when Studio is installed.
+    expect((await fetch(`${BASE}/api/rbxasset/textures/particles/fire_main.dds`)).status).toBe(404);
+    expect((await fetch(`${BASE}/api/rbxasset/..%2Fsecret`)).status).toBe(404);
+  });
+
   it("browses the open place: Explorer, map, scripts and selection", async () => {
     const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
     const top = (await post("/api/place/children", { path: [] })).body;

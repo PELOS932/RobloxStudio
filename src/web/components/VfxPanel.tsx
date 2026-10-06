@@ -3,7 +3,13 @@ import { api } from "../lib/api.ts";
 import { Icon } from "../lib/icons.tsx";
 import { importAsset, insertIntoComposer, loadAsset, setRightTab, toast, useStore } from "../store.ts";
 import type { AssetSummary } from "../../shared/assets.ts";
-import { VfxViewer } from "./VfxViewer.tsx";
+import { usePref, VfxViewer } from "./VfxViewer.tsx";
+import { AbilityViewer } from "./AbilityViewer.tsx";
+import { useResolvedAbility } from "../lib/use-ability.ts";
+import { ATTACH_POINTS, type AbilitySpec, type AttachPoint } from "../../shared/ability.ts";
+import { animationLength, type RigType } from "../../shared/animation.ts";
+import { isOneShot, oneShotLength } from "../../shared/vfx.ts";
+import type { Asset } from "../../shared/assets.ts";
 import { AssetThumb } from "./AssetThumb.tsx";
 import { timeAgo } from "./Library.tsx";
 
@@ -11,7 +17,12 @@ import { timeAgo } from "./Library.tsx";
 
 const STARTER_NAMES = /^(Campfire|Magic Aura|Explosion|Portal)$/;
 
-export function VfxPanel({ items }: { items: AssetSummary[] }) {
+const ATTACH_LABEL: Record<AttachPoint, string> = {
+  root: "Body center", rightHand: "Right hand", leftHand: "Left hand", head: "Head", torso: "Chest",
+  rightFoot: "Right foot", leftFoot: "Left foot", ground: "Ground", world: "Cast spot",
+};
+
+export function VfxPanel({ items, animations = [] }: { items: AssetSummary[]; animations?: AssetSummary[] }) {
   const studio = useStore((s) => s.studio);
   const selected = useStore((s) => s.vfxId);
   const cache = useStore((s) => s.assetCache);
@@ -23,10 +34,47 @@ export function VfxPanel({ items }: { items: AssetSummary[] }) {
   const full = current ? cache[current.id] : undefined;
   const asset = full && full.kind === "vfx" && full.version === current?.version ? full : undefined;
   const ready = studio.state === "connected" && !!studio.studioId;
+  // "On character": the effect plays on a dummy, attached to a body part, while an animation runs.
+  const [onChar, setOnChar] = usePref<"on" | "off">("forge.vfxOnChar", "off", ["on", "off"]);
+  const [charRig, setCharRig] = usePref<RigType>("forge.vfxRig", "R15", ["R15", "R6"]);
+  const [charAttach, setCharAttach] = usePref<AttachPoint>("forge.vfxAttach", "rightHand", ATTACH_POINTS);
+  const [charAnim, setCharAnim] = usePref<string>("forge.vfxAnim", "", ["", ...animations.map((a) => a.id)]);
+  const anim = charAnim ? cache[charAnim] : undefined;
+  useEffect(() => {
+    if (charAnim && !anim) void loadAsset(charAnim);
+  }, [charAnim, anim]);
+  const adHoc = useMemo<AbilitySpec | null>(() => {
+    if (!asset || onChar !== "on") return null;
+    const vfx = asset.spec;
+    const oneShot = isOneShot(vfx);
+    const animLen = anim?.kind === "animation" ? animationLength(anim.spec) : 0;
+    const length = Math.min(30, Math.max(1, animLen, oneShot ? oneShotLength(vfx) + 0.6 : 3));
+    return {
+      name: vfx.name,
+      rig: charRig,
+      ...(charAnim && anim ? { animation: charAnim } : {}),
+      events: [{ at: oneShot ? Math.min(0.3, length / 3) : 0, vfx, attach: charAttach, duration: oneShot ? 0.5 : length }],
+      length,
+    };
+  }, [asset, onChar, charRig, charAttach, charAnim, anim]);
+  const resolvedAdHoc = useResolvedAbility(adHoc);
 
   useEffect(() => {
     if (current && !asset) void loadAsset(current.id);
   }, [current?.id, current?.version, asset]);
+
+  /** Save what's shown on the character as an ability (it references this effect and animation). */
+  const makeAbility = async () => {
+    if (!adHoc || !current) return;
+    try {
+      const spec = { ...adHoc, name: `${current.name} Power`, events: adHoc.events.map((e) => ({ ...e, vfx: current.id })) };
+      const created = await api<Asset>("/assets", { body: { kind: "ability", spec } });
+      useStore.setState({ abilityId: created.id, libraryTab: "abilities" });
+      toast(`Saved "${created.name}" in Abilities`, "success");
+    } catch (e) {
+      toast(String(e), "error");
+    }
+  };
 
   const addStarters = async () => {
     setAdding(true);
@@ -127,8 +175,42 @@ export function VfxPanel({ items }: { items: AssetSummary[] }) {
                 </a>
               </div>
             )}
+            <div className="vfx-char">
+              <button className={`btn small ${onChar === "on" ? "active" : ""}`} title="Preview the effect on a character, attached to a body part while an animation plays" onClick={() => setOnChar(onChar === "on" ? "off" : "on")}>
+                <Icon name="person" size={13} /> On character
+              </button>
+              {onChar === "on" && (
+                <>
+                  <span className="seg">
+                    {(["R15", "R6"] as const).map((r) => (
+                      <button key={r} className={charRig === r ? "active" : ""} onClick={() => setCharRig(r)}>{r}</button>
+                    ))}
+                  </span>
+                  <select className="input select-sm" value={charAttach} onChange={(e) => setCharAttach(e.target.value as AttachPoint)} title="Where the effect is attached">
+                    {ATTACH_POINTS.map((p) => (
+                      <option key={p} value={p}>{ATTACH_LABEL[p]}</option>
+                    ))}
+                  </select>
+                  <select className="input select-sm" value={charAnim} onChange={(e) => setCharAnim(e.target.value)} title="Animation the character plays">
+                    <option value="">Standing still</option>
+                    {animations.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <button className="btn small" title="Save this as an ability (animation + effect) in the Abilities tab" onClick={() => void makeAbility()}>
+                    <Icon name="wand" size={13} /> <span className="long">Save as ability</span>
+                  </button>
+                </>
+              )}
+            </div>
             <div className="stage">
-              {asset ? <VfxViewer spec={asset.spec} /> : <div className="stage-empty"><span className="spinner" /></div>}
+              {asset && onChar === "on" && resolvedAdHoc ? (
+                <AbilityViewer resolved={resolvedAdHoc} rig={charRig} compact />
+              ) : asset ? (
+                <VfxViewer spec={asset.spec} />
+              ) : (
+                <div className="stage-empty"><span className="spinner" /></div>
+              )}
             </div>
           </div>
         </div>

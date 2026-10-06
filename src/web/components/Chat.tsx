@@ -38,12 +38,13 @@ const STARTERS: { kind: AssetKind | "studio"; title: string; sub: string; prompt
   { kind: "ui", title: "Game HUD", sub: "Health, coins and hotbar", prompt: "Design a game HUD in HTML: currency pills top-right, health/stamina bars bottom-left, a 5-slot hotbar bottom-center and a quest tracker on the right. Readable on phone and desktop." },
   { kind: "script", title: "Proximity door", sub: "Model plus the script that opens it", prompt: "Make a wooden door with a frame, then a server Script that slides it open when a player gets within 10 studs and closes it after." },
   { kind: "animation", title: "Victory dance", sub: "R15 animation, previewed live", prompt: "Make a fun 2-second looping R15 victory dance: arm pumps over the head, a hip sway, a little hop and a head bob." },
+  { kind: "ability", title: "Fire punch", sub: "Animation + effects, previewed on a rig", prompt: "Make an R15 fire punch ability: a quick windup with flames gathering on the right fist, a forward punch that launches a short burst of fire, and an impact flash with embers in front of the character." },
   { kind: "vfx", title: "Fireball impact", sub: "One-shot effect, previewed live", prompt: "Make a fireball impact VFX: a bright flash, an expanding shockwave ring, fiery chunks flying out with gravity, lingering smoke and a short orange light." },
   { kind: "studio", title: "Polish my selection", sub: "Improve what's selected in Studio", prompt: "Pull my current Studio selection and make it look more polished — better materials, colors and small details — then update it in Studio." },
 ];
 
-const ASSET_TOOLS = new Set(["create_model", "edit_model", "create_ui", "edit_ui", "create_ui_html", "edit_ui_html", "create_animation", "edit_animation", "create_vfx", "edit_vfx", "import_to_studio", "studio_pull_selection"]);
-const MENTION = /^((?:@[musav]_[a-z0-9]{6}\s+)+)/;
+const ASSET_TOOLS = new Set(["create_model", "edit_model", "create_ui", "edit_ui", "create_ui_html", "edit_ui_html", "create_animation", "edit_animation", "create_vfx", "edit_vfx", "create_ability", "edit_ability", "import_to_studio", "studio_pull_selection"]);
+const MENTION = /^((?:@[musavb]_[a-z0-9]{6}\s+)+)/;
 
 // ---------------------------------------------------------------------------
 
@@ -310,7 +311,7 @@ function ChatMenu({ onCompact, onRename, onExport, onDelete }: { onCompact: () =
 
 // ---------------------------------------------------------------------------
 
-const KIND_LABEL: Record<AssetKind | "studio", string> = { model: "model", ui: "ui", script: "script", animation: "anim", vfx: "vfx", studio: "studio" };
+const KIND_LABEL: Record<AssetKind | "studio", string> = { model: "model", ui: "ui", script: "script", animation: "anim", vfx: "vfx", ability: "ability", studio: "studio" };
 
 function Welcome() {
   const claude = useStore((s) => s.claude);
@@ -322,7 +323,7 @@ function Welcome() {
   const claudeOk = claude.cli === "ok" && claude.loggedIn !== false;
   return (
     <div className="welcome">
-      <h1>Describe a model, a UI, an animation, an effect or a script.</h1>
+      <h1>Describe a model, a UI, an animation, an effect, an ability or a script.</h1>
       <p>It appears in the preview as soon as Claude makes it. One click puts it in your open Roblox Studio place.</p>
       <dl className="readout">
         <div>
@@ -459,7 +460,7 @@ const MessageView = memo(function MessageView({ message, live, isLast, onRetry }
       message.blocks.flatMap((b) => {
         if (b.type !== "tool" || b.status !== "done") return [];
         if (!ASSET_TOOLS.has(b.name.replace(/^mcp__forge__/, ""))) return [];
-        const id = b.result?.text.match(/\b([musav]_[a-z0-9]{6})\b/)?.[1];
+        const id = b.result?.text.match(/\b([musavb]_[a-z0-9]{6})\b/)?.[1];
         return id ? [id] : [];
       }),
     ),
@@ -596,10 +597,11 @@ function liveLabel(message: ChatMessage): string {
   if (last?.type === "compact" && last.status === "running") return "Compacting the conversation";
   if (!running) return !last ? "Starting" : last.type === "text" ? "Writing" : "Thinking";
   const n = running.name.replace(/^mcp__forge__/, "");
-  if (running.inputPartial !== undefined && !/vfx/.test(n)) return n === "create_model" || n === "edit_model" ? "Designing the model" : /ui/.test(n) ? "Designing the UI" : "Preparing the next step";
+  if (running.inputPartial !== undefined && !/vfx|ability/.test(n)) return n === "create_model" || n === "edit_model" ? "Designing the model" : /ui/.test(n) ? "Designing the UI" : "Preparing the next step";
   if (n === "create_model" || n === "edit_model") return "Building the model";
   if (n.includes("ui")) return "Building the UI";
   if (n === "create_script") return "Writing scripts into Studio";
+  if (n === "create_ability" || n === "edit_ability") return running.inputPartial !== undefined ? "Designing the ability" : "Building the ability";
   if (n === "create_vfx" || n === "edit_vfx") return running.inputPartial !== undefined ? "Designing the effect" : "Building the effect";
   if (n === "studio_playtest") return "Play-testing";
   if (n === "import_to_studio") return "Importing into Studio";
@@ -753,7 +755,7 @@ function AssetCard({ id }: { id: string }) {
       <div className="asset-info">
         <button className="asset-name" onClick={() => openAsset(id)}>{asset.name}</button>
         <span className="asset-meta">
-          {asset.kind === "ui" ? (asset.fromHtml ? "ui · html" : "ui") : asset.kind === "animation" ? "animation" : asset.kind === "vfx" ? "effect" : asset.kind} · {sizeLabel(asset.kind, asset.size)} · v{asset.version}
+          {asset.kind === "ui" ? (asset.fromHtml ? "ui · html" : "ui") : asset.kind === "animation" ? "animation" : asset.kind === "vfx" ? "effect" : asset.kind === "ability" ? `ability · ${asset.detail ?? ""}` : asset.kind} · {sizeLabel(asset.kind, asset.size)} · v{asset.version}
         </span>
         <span className={`asset-studio ${inStudio ? "ok" : asset.lastImport ? "stale" : ""}`}>
           <i className="sq" />

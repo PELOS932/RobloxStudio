@@ -10,8 +10,9 @@ import type { Asset, Game } from "../../shared/protocol.ts";
 import { AssetThumb } from "./AssetThumb.tsx";
 import { AnimatePanel } from "./AnimatePanel.tsx";
 import { VfxPanel } from "./VfxPanel.tsx";
+import { AbilityPanel } from "./AbilityPanel.tsx";
 
-// The library, organized by game (Studio place), with Models, Animations and VFX tabs. New assets
+// The library, organized by game (Studio place), with Models, Animations, VFX and Abilities tabs. New assets
 // are filed under the game open in Studio. Model previews come from cached images and turn around
 // on hover. Scripts go straight into Studio and UIs live in the preview, so neither is listed here.
 
@@ -58,7 +59,7 @@ export function Library() {
   const gameName = (id?: string) => (id ? games.find((g) => g.id === id)?.name : undefined);
   const inGame = (a: AssetSummary) => filter === "all" || (filter === "none" ? !a.gameId || !gameName(a.gameId) : a.gameId === filter);
   const byKind = useMemo(() => {
-    const out: Record<AssetKind, AssetSummary[]> = { model: [], animation: [], vfx: [], ui: [], script: [] };
+    const out: Record<AssetKind, AssetSummary[]> = { model: [], animation: [], vfx: [], ability: [], ui: [], script: [] };
     for (const a of assets) if (inGame(a)) out[a.kind].push(a);
     return out;
   }, [assets, games, filter]);
@@ -81,6 +82,7 @@ export function Library() {
     ["models", "Models", "cube", byKind.model.length],
     ["animations", "Animations", "anim", byKind.animation.length],
     ["vfx", "VFX", "flame", byKind.vfx.length],
+    ["abilities", "Abilities", "wand", byKind.ability.length],
   ];
 
   return (
@@ -105,7 +107,8 @@ export function Library() {
       {pasteOpen && <PasteJson onDone={() => setPasteOpen(false)} />}
       {tab === "models" && <ModelGrid items={byKind.model} all={assets} filter={filter} title={title} gameName={gameName} />}
       {tab === "animations" && <AnimatePanel items={byKind.animation} />}
-      {tab === "vfx" && <VfxPanel items={byKind.vfx} />}
+      {tab === "vfx" && <VfxPanel items={byKind.vfx} animations={byKind.animation} />}
+      {tab === "abilities" && <AbilityPanel items={byKind.ability} />}
     </div>
   );
 }
@@ -438,7 +441,7 @@ function PasteJson({ onDone }: { onDone: () => void }) {
   const submit = async () => {
     try {
       const parsed = JSON.parse(text);
-      const kind = parsed.kind ?? (parsed.parts ? "model" : parsed.nodes ? "ui" : parsed.emitters ? "vfx" : parsed.keyframes ? "animation" : undefined);
+      const kind = parsed.kind ?? (parsed.parts ? "model" : parsed.nodes ? "ui" : parsed.emitters ? "vfx" : parsed.events ? "ability" : parsed.keyframes ? "animation" : undefined);
       const spec = parsed.spec ?? parsed;
       const asset = await api<Asset>("/assets", { body: { kind, spec } });
       openAsset(asset.id);

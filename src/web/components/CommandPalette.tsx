@@ -17,7 +17,7 @@ interface Item {
   /** Extra words that should match (not shown). */
   keywords?: string;
   icon?: IconName;
-  kind?: "model" | "ui" | "script" | "animation" | "vfx";
+  kind?: "model" | "ui" | "script" | "animation" | "vfx" | "ability";
   run: () => void;
 }
 
@@ -97,6 +97,7 @@ function Palette() {
       act(`game-${g.id}`, `Library: ${g.name}`, "map", () => useStore.setState({ rightTab: "assets", mobileView: "panel", libraryGame: g.id }), undefined, "game place assets models");
     }
     act("tab-animate", "Open animations", "anim", () => (setLibraryTab("animations"), useStore.setState({ mobileView: "panel" })), undefined, "animate r6 r15 rig keyframes dance walk");
+    act("tab-abilities", "Open abilities", "wand", () => (setLibraryTab("abilities"), useStore.setState({ mobileView: "panel" })), undefined, "abilities powers magic skills attacks spells");
     act("tab-vfx", "Open effects (VFX)", "flame", () => (setLibraryTab("vfx"), useStore.setState({ mobileView: "panel" })), undefined, "vfx particles effects fire smoke beam trail");
     act("tab-place", "Browse the Studio place", "map", () => useStore.setState({ rightTab: "place", mobileView: "panel" }), undefined, "explorer workspace tree scripts gui");
     if (studioReady) {

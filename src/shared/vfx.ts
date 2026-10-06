@@ -368,6 +368,25 @@ function scaleSeq(s: NumberSeq | undefined, k: number): NumberSeq | undefined {
 const scaleRange = (r: number | number[] | undefined, k: number) => (r === undefined ? r : typeof r === "number" ? r * k : r.map((v) => v * k));
 const scaleVec = (v: number[] | undefined, k: number) => v?.map((x) => x * k);
 
+/** The whole effect scaled (sizes, speeds, offsets, light ranges). */
+export function scaleVfx(spec: VfxSpec, k: number): VfxSpec {
+  if (k === 1) return spec;
+  return { ...spec, emitters: spec.emitters.map((e) => scaleEmitter(e, k)) };
+}
+
+/** The longest a particle or trail segment can live, seconds (how long the effect takes to fade). */
+export function vfxTail(spec: VfxSpec): number {
+  let t = 0;
+  for (const e of spec.emitters) {
+    if (e.type === "particles") t = Math.max(t, (e.delay ?? 0) + rangeOf(e.lifetime, PARTICLE_DEFAULTS.lifetime)[1] / (e.timeScale || 1));
+    else if (e.type === "trail") t = Math.max(t, e.lifetime ?? 0.5);
+    else if (e.type === "smoke") t = Math.max(t, 6);
+    else if (e.type === "fire" || e.type === "sparkles") t = Math.max(t, 1.5);
+    else t = Math.max(t, 0.25);
+  }
+  return t;
+}
+
 function scaleEmitter(e: VfxEmitter, k: number): VfxEmitter {
   const pos = scaleVec(e.pos, k);
   switch (e.type) {

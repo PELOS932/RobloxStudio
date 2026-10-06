@@ -23,6 +23,8 @@ import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from 
 import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
 import { applyVfxEdit, sanitizeVfxSpec, VfxEditSchema, VfxSpecSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
 import { scriptsToLuau } from "../shared/to-luau.ts";
+import { AbilityEditSchema, AbilitySpecSchema, applyAbilityEdit, ATTACH_POINTS, sanitizeAbilitySpec } from "../shared/ability.ts";
+import { resolveStored } from "./importer.ts";
 import { editLuau, LIGHTING_PRESETS, lightingLuau, queryLuau, scriptSearchLuau, terrainLuau, undoLuau, type EditOp, type TerrainOp } from "../shared/studio-ops.ts";
 import { ID_PREFIX, sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
@@ -94,6 +96,12 @@ function looseItems(s: JsonSchema, props: Record<string, string>): JsonSchema {
       ? { type: "array", items: { type: "object" }, description }
       : { type: "object", additionalProperties: { type: "object" }, description };
   }
+  return s;
+}
+
+/** Show a property as "anything" with a description (e.g. an asset id or an inline spec). */
+function loose(s: JsonSchema, props: Record<string, string>): JsonSchema {
+  for (const [key, description] of Object.entries(props)) if (s.properties?.[key]) s.properties[key] = { description };
   return s;
 }
 
@@ -200,9 +208,14 @@ export class ForgeMcp {
   // -------------------------------------------------------------------------
 
   private async afterSave(asset: Asset, verb: string, ctx: Ctx, warnings: string[] = []): Promise<ToolResult> {
-    const extra = asset.kind === "animation"
+    let extra = asset.kind === "animation"
       ? `, ${asset.spec.rig}, ${Math.round(animationLength(asset.spec) * 100) / 100}s`
       : asset.kind === "vfx" ? `: ${vfxSummary(asset.spec)}` : dims(asset);
+    if (asset.kind === "ability") {
+      const r = resolveStored(asset.spec);
+      extra = `, ${asset.spec.rig}, ${r.length}s`;
+      if (r.missing.length) warnings = [...warnings, `missing assets: ${r.missing.join(", ")}`];
+    }
     const lines = [`${verb} ${asset.kind} "${asset.name}" (id ${asset.id}, v${asset.version}, ${sizeLabel(asset.kind, summarize(asset).size)}${extra}). Shown in the preview.`];
     if (warnings.length) lines.push(`Notes: ${warnings.slice(0, 8).join("; ")}`);
     // Positioning problems Claude can fix before the user notices (floating parts, flicker…).
@@ -448,6 +461,36 @@ export class ForgeMcp {
           const { spec, missing } = applyVfxEdit(prev.spec, edit);
           const asset = this.save("vfx", spec, assetId);
           return this.afterSave(asset, "Edited", ctx, missing.length ? [`not found: ${missing.join(", ")}`] : []);
+        },
+      },
+      {
+        name: "create_ability",
+        description:
+          "Create (or replace, with id) an ability: an animation plus effects timed to it (fireballs, slams, auras, slashes), previewed on an R15/R6 dummy. Import adds ReplicatedStorage.Abilities.<name> (require(...Play)(character) casts it) and a StarterPack Tool to try it.",
+        schema: AbilitySpecSchema.extend({ id: id.optional().describe("replace this existing ability") }),
+        advertise: (s) => looseItems(loose(s, { animation: "animation id (a_…) or inline {keyframes, loop?, priority?} as in create_animation" }), {
+          events: `[{at: seconds, vfx: effect id (v_…) or inline {emitters} in create_vfx format, attach?: ${ATTACH_POINTS.join("|")} (default root), offset?: [x,y,z] in the character's frame (x right, y up, z back; forward is -z), follow?: character|part, duration?: s (default 1), travel?: {velocity: [x,y,z] studs/s in the character's frame, gravity?, stopOnHit?}, impact?: effect id or inline effect played where it lands, scale?, name?}]`,
+        }),
+        run: async ({ id: replaceId, ...raw }, ctx) => {
+          const spec = sanitizeAbilitySpec(raw);
+          const asset = this.save("ability", spec, replaceId);
+          return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx);
+        },
+      },
+      {
+        name: "edit_ability",
+        description: "Change an ability: update events by index (only listed fields; null removes one), add or remove events, or change rig, animation, length or cooldown.",
+        schema: AbilityEditSchema.extend({ id }),
+        advertise: (s) => looseItems(loose(s, { animation: "animation id or inline keyframes, as in create_ability" }), {
+          add: "new events, same format as create_ability events",
+          update: "[{index, ...fields to change}] (indexes as in get_asset, sorted by at)",
+        }),
+        run: async ({ id: assetId, ...edit }, ctx) => {
+          const prev = assets.get(assetId);
+          if (!prev || prev.kind !== "ability") return text(`No ability with id ${assetId}.`, true);
+          const { spec, missing } = applyAbilityEdit(prev.spec, edit);
+          const asset = this.save("ability", spec, assetId);
+          return this.afterSave(asset, "Edited", ctx, missing.length ? [`no event at index ${missing.join(", ")}`] : []);
         },
       },
       {

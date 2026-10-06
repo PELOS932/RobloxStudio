@@ -1,0 +1,232 @@
+[
+  {
+    "name": "Fireball",
+    "description": "Wind up, throw a blazing fireball that explodes where it lands.",
+    "rig": "R15",
+    "cooldown": 1.5,
+    "animation": {
+      "loop": false,
+      "keyframes": [
+        { "t": 0, "ease": "cubic", "poses": { "rightShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "waist": [0, 0, 0], "leftShoulder": [0, 0, 0] } },
+        { "t": 0.3, "ease": "cubic", "poses": { "rightShoulder": [-35, 0, 45], "rightElbow": [95, 0, 0], "waist": [0, -30, 0], "leftShoulder": [35, 0, -15], "rightHip": [0, 0, 0], "leftHip": [-10, 0, 0] } },
+        { "t": 0.45, "ease": "cubic", "dir": "out", "poses": { "rightShoulder": [100, 0, 8], "rightElbow": [8, 0, 0], "waist": [0, 22, 0], "leftShoulder": [-25, 0, -10], "leftHip": [20, 0, 0], "leftKnee": [-20, 0, 0] } },
+        { "t": 0.85, "ease": "cubic", "poses": { "rightShoulder": [85, 0, 4], "waist": [0, 14, 0] } },
+        { "t": 1.3, "poses": { "rightShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "waist": [0, 0, 0], "leftShoulder": [0, 0, 0], "leftHip": [0, 0, 0], "leftKnee": [0, 0, 0] } }
+      ]
+    },
+    "events": [
+      {
+        "name": "Charge", "at": 0, "attach": "rightHand", "duration": 0.45,
+        "vfx": { "emitters": [
+          { "name": "Flame", "type": "particles", "texture": "fire", "color": ["#ffd36b", "#ff5a1f"], "size": [[0, 0.9], [1, 0.2]], "transparency": [[0, 0.2], [1, 1]], "lifetime": [0.25, 0.4], "rate": 70, "speed": [0.5, 1.5], "spread": 180, "lightEmission": 1 },
+          { "name": "Glow", "type": "light", "color": "#ff8a3a", "brightness": 3, "range": 8 }
+        ] }
+      },
+      {
+        "name": "Fireball", "at": 0.45, "attach": "rightHand", "offset": [0, 0, -0.8], "duration": 1.4,
+        "travel": { "velocity": [0, -2.5, -48] },
+        "vfx": { "emitters": [
+          { "name": "Core", "type": "particles", "texture": "glow", "color": "#fff0b0", "size": 1.7, "transparency": 0.05, "lifetime": 0.08, "rate": 90, "speed": 0, "lightEmission": 1, "locked": true },
+          { "name": "Flames", "type": "particles", "texture": "fire", "color": [[0, "#ffe08a"], [0.4, "#ff7b22"], [1, "#7a1d0a"]], "size": [[0, 1.7], [1, 0.3]], "transparency": [[0, 0.1], [1, 1]], "lifetime": [0.25, 0.45], "rate": 140, "speed": [0.5, 2], "spread": 180, "rotation": [0, 360], "spin": [-90, 90], "lightEmission": 1 },
+          { "name": "Embers", "type": "particles", "texture": "spark", "color": "#ffb04d", "size": [0.22, 0], "transparency": [0, 1], "lifetime": [0.3, 0.6], "rate": 70, "speed": [1, 3], "spread": 180, "lightEmission": 1 },
+          { "name": "Light", "type": "light", "color": "#ff8a3a", "brightness": 4, "range": 16 }
+        ] },
+        "impact": { "name": "Fireball Impact", "emitters": [
+          { "name": "Flash", "type": "particles", "pos": [0, 1.5, 0], "texture": "glow", "color": "#fff1c1", "size": [[0, 3], [1, 10]], "transparency": [0, 1], "lifetime": 0.22, "burst": 1, "speed": 0, "lightEmission": 1, "zOffset": 1 },
+          { "name": "Shockwave", "type": "particles", "pos": [0, 0.3, 0], "texture": "ring", "color": "#ffd9a0", "size": [[0, 2], [1, 16]], "transparency": [[0, 0.2], [1, 1]], "lifetime": 0.5, "burst": 1, "speed": 0, "orientation": "velocityPerp", "lightEmission": 0.6 },
+          { "name": "Blast", "type": "particles", "pos": [0, 1.5, 0], "texture": "core", "color": [[0, "#ffe08a"], [0.4, "#ff7b22"], [1, "#5a1d0a"]], "size": [[0, 2.2], [1, 5]], "transparency": [[0, 0], [0.7, 0.4], [1, 1]], "lifetime": [0.5, 0.8], "burst": 14, "speed": [5, 11], "spread": 180, "drag": 4, "rotation": [0, 360], "lightEmission": 0.8 },
+          { "name": "Smoke", "type": "particles", "pos": [0, 2, 0], "texture": "puff", "color": "#3b3632", "size": [[0, 2], [1, 6]], "transparency": [[0, 0.45], [1, 1]], "lifetime": [1.5, 2.2], "burst": 10, "delay": 0.1, "speed": [2, 5], "spread": 180, "drag": 2, "accel": [0, 2, 0], "rotation": [0, 360] },
+          { "name": "Sparks", "type": "particles", "pos": [0, 1, 0], "texture": "spark", "color": ["#fff2b0", "#ff8a1f"], "size": [0.3, 0.05], "transparency": [0, 1], "lifetime": [0.6, 1.1], "burst": 30, "speed": [14, 28], "spread": 75, "accel": [0, -40, 0], "drag": 1.5, "orientation": "velocity", "squash": 1.5, "lightEmission": 1 },
+          { "name": "Light", "type": "light", "pos": [0, 2, 0], "color": "#ff9a4a", "brightness": 5, "range": 20 }
+        ] }
+      }
+    ]
+  },
+  {
+    "name": "Lightning Strike",
+    "description": "Raise a crackling hand and call a bolt down in front of you.",
+    "rig": "R15",
+    "cooldown": 2,
+    "animation": {
+      "loop": false,
+      "keyframes": [
+        { "t": 0, "ease": "cubic", "poses": { "rightShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "neck": [0, 0, 0], "waist": [0, 0, 0] } },
+        { "t": 0.35, "ease": "cubic", "poses": { "rightShoulder": [165, 0, 12], "rightElbow": [12, 0, 0], "neck": [18, 0, 0], "waist": [6, 0, 0], "leftShoulder": [0, 0, -20] } },
+        { "t": 0.5, "ease": "cubic", "dir": "out", "poses": { "rightShoulder": [80, 0, 0], "rightElbow": [5, 0, 0], "neck": [-8, 0, 0], "waist": [-12, 0, 0], "leftShoulder": [-15, 0, -10] } },
+        { "t": 1.1, "ease": "cubic", "poses": { "rightShoulder": [70, 0, 0], "waist": [-8, 0, 0] } },
+        { "t": 1.5, "poses": { "rightShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "neck": [0, 0, 0], "waist": [0, 0, 0], "leftShoulder": [0, 0, 0] } }
+      ]
+    },
+    "events": [
+      {
+        "name": "Crackle", "at": 0.1, "attach": "rightHand", "duration": 0.45,
+        "vfx": { "emitters": [
+          { "name": "Sparks", "type": "particles", "texture": "spark", "color": "#d8f4ff", "size": [0.35, 0], "transparency": [0, 1], "lifetime": 0.2, "rate": 80, "speed": [3, 7], "spread": 180, "orientation": "velocity", "lightEmission": 1 },
+          { "name": "Glow", "type": "particles", "texture": "glow", "color": "#9fd0ff", "size": [[0, 1.4], [1, 0.6]], "transparency": [0.3, 1], "lifetime": 0.15, "rate": 30, "speed": 0, "lightEmission": 1, "locked": true },
+          { "name": "Light", "type": "light", "color": "#9fb4ff", "brightness": 3, "range": 9 }
+        ] }
+      },
+      {
+        "name": "Bolt", "at": 0.5, "attach": "ground", "offset": [0, 0, -12], "duration": 0.3,
+        "vfx": { "emitters": [
+          { "name": "BoltA", "type": "beam", "from": [0, 45, 0], "to": [2.2, 30, 0], "width": 0.5, "color": "#e8f6ff", "transparency": 0.05, "lightEmission": 1, "brightness": 1.5 },
+          { "name": "BoltB", "type": "beam", "from": [2.2, 30, 0], "to": [-1.6, 16, 0.6], "width": 0.5, "color": "#e8f6ff", "transparency": 0.05, "lightEmission": 1, "brightness": 1.5 },
+          { "name": "BoltC", "type": "beam", "from": [-1.6, 16, 0.6], "to": [0, 0, 0], "width": 0.55, "color": "#e8f6ff", "transparency": 0.05, "lightEmission": 1, "brightness": 1.5 },
+          { "name": "Halo", "type": "beam", "from": [0, 45, 0], "to": [0, 0, 0], "width": 4, "color": "#7a8cff", "transparency": 0.75, "texture": "glow", "textureLength": 6, "textureSpeed": 20, "textureMode": "wrap", "lightEmission": 1 },
+          { "name": "Sky Light", "type": "light", "pos": [0, 8, 0], "color": "#b9c8ff", "brightness": 8, "range": 40 }
+        ] }
+      },
+      {
+        "name": "Strike Impact", "at": 0.52, "attach": "ground", "offset": [0, 0, -12], "duration": 0.4,
+        "vfx": { "emitters": [
+          { "name": "Flash", "type": "particles", "pos": [0, 1, 0], "texture": "glow", "color": "#f0f6ff", "size": [[0, 4], [1, 12]], "transparency": [0, 1], "lifetime": 0.25, "burst": 1, "speed": 0, "lightEmission": 1 },
+          { "name": "Ring", "type": "particles", "pos": [0, 0.2, 0], "texture": "ring", "color": "#a9c4ff", "size": [[0, 2], [1, 18]], "transparency": [[0, 0.1], [1, 1]], "lifetime": 0.45, "burst": 1, "speed": 0, "orientation": "velocityPerp", "lightEmission": 1 },
+          { "name": "Sparks", "type": "particles", "pos": [0, 0.5, 0], "texture": "spark", "color": "#dff2ff", "size": [0.35, 0.05], "transparency": [0, 1], "lifetime": [0.4, 0.8], "burst": 40, "speed": [15, 30], "spread": 70, "accel": [0, -35, 0], "orientation": "velocity", "squash": 2, "lightEmission": 1 },
+          { "name": "Scorch", "type": "particles", "pos": [0, 0.5, 0], "texture": "puff", "color": "#2c2f3a", "size": [[0, 2], [1, 7]], "transparency": [[0, 0.5], [1, 1]], "lifetime": [1.2, 1.8], "burst": 8, "speed": [2, 5], "spread": 80, "drag": 2, "rotation": [0, 360] }
+        ] }
+      }
+    ]
+  },
+  {
+    "name": "Healing Aura",
+    "description": "Arms open, a green ring rises and heals everyone standing in it.",
+    "rig": "R15",
+    "cooldown": 4,
+    "animation": {
+      "loop": false,
+      "keyframes": [
+        { "t": 0, "ease": "cubic", "poses": { "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "neck": [0, 0, 0], "rightElbow": [0, 0, 0], "leftElbow": [0, 0, 0] } },
+        { "t": 0.45, "ease": "cubic", "poses": { "rightShoulder": [20, 0, 75], "leftShoulder": [20, 0, -75], "rightElbow": [25, 0, 0], "leftElbow": [25, 0, 0], "neck": [14, 0, 0] } },
+        { "t": 2.1, "ease": "cubic", "poses": { "rightShoulder": [25, 0, 80], "leftShoulder": [25, 0, -80], "neck": [16, 0, 0] } },
+        { "t": 2.6, "poses": { "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "leftElbow": [0, 0, 0], "neck": [0, 0, 0] } }
+      ]
+    },
+    "events": [
+      {
+        "name": "Pulse", "at": 0.4, "attach": "ground", "duration": 0.5,
+        "vfx": { "emitters": [
+          { "name": "Wave", "type": "particles", "pos": [0, 0.15, 0], "texture": "ring", "color": "#7dffb0", "size": [[0, 1], [1, 16]], "transparency": [[0, 0.1], [1, 1]], "lifetime": 0.7, "burst": 1, "speed": 0, "orientation": "velocityPerp", "lightEmission": 1 }
+        ] }
+      },
+      {
+        "name": "Ring", "at": 0.3, "attach": "ground", "duration": 2,
+        "vfx": { "emitters": [
+          { "name": "Edge", "type": "particles", "pos": [0, 0.15, 0], "shape": "disc", "shapeSize": [9, 0.2, 9], "surface": true, "texture": "glow", "color": ["#b6ffd0", "#2ee07a"], "size": [[0, 0.8], [1, 0]], "transparency": [[0, 0.15], [1, 1]], "lifetime": [0.9, 1.5], "rate": 110, "speed": [2, 4], "lightEmission": 1 },
+          { "name": "Floor", "type": "particles", "pos": [0, 0.1, 0], "texture": "glow", "color": "#3dff8f", "size": 9, "transparency": 0.8, "lifetime": 0.3, "rate": 8, "speed": 0, "orientation": "velocityPerp", "lightEmission": 1 }
+        ] }
+      },
+      {
+        "name": "Rising Light", "at": 0.45, "attach": "root", "duration": 1.8,
+        "vfx": { "emitters": [
+          { "name": "Motes", "type": "particles", "pos": [0, -1.5, 0], "shape": "disc", "shapeSize": [6, 0.2, 6], "texture": "sparkle", "color": "#d9ffe6", "size": [0.45, 0], "transparency": [0, 1], "lifetime": [1, 1.6], "rate": 28, "speed": [2, 4.5], "spin": [-120, 120], "lightEmission": 1 },
+          { "name": "Light", "type": "light", "color": "#5dff96", "brightness": 2.5, "range": 14 }
+        ] }
+      }
+    ]
+  },
+  {
+    "name": "Ground Slam",
+    "description": "Leap, then smash the ground: shockwave, flying rocks and dust.",
+    "rig": "R15",
+    "cooldown": 2.5,
+    "animation": {
+      "loop": false,
+      "keyframes": [
+        { "t": 0, "ease": "cubic", "poses": { "root": { "pos": [0, 0, 0] }, "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "rightHip": [0, 0, 0], "leftHip": [0, 0, 0], "rightKnee": [0, 0, 0], "leftKnee": [0, 0, 0], "waist": [0, 0, 0] } },
+        { "t": 0.22, "ease": "cubic", "poses": { "root": { "pos": [0, -0.7, 0] }, "rightHip": [45, 0, 0], "leftHip": [45, 0, 0], "rightKnee": [-75, 0, 0], "leftKnee": [-75, 0, 0], "rightShoulder": [-30, 0, 10], "leftShoulder": [-30, 0, -10], "waist": [-15, 0, 0] } },
+        { "t": 0.5, "ease": "cubic", "dir": "out", "poses": { "root": { "pos": [0, 4, 0] }, "rightHip": [20, 0, 0], "leftHip": [20, 0, 0], "rightKnee": [-40, 0, 0], "leftKnee": [-40, 0, 0], "rightShoulder": [170, 0, 10], "leftShoulder": [170, 0, -10], "waist": [10, 0, 0] } },
+        { "t": 0.68, "ease": "cubic", "dir": "in", "poses": { "root": { "pos": [0, -0.9, 0] }, "rightHip": [60, 0, 0], "leftHip": [60, 0, 0], "rightKnee": [-95, 0, 0], "leftKnee": [-95, 0, 0], "rightShoulder": [55, 0, 0], "leftShoulder": [55, 0, 0], "waist": [-28, 0, 0] } },
+        { "t": 1.05, "ease": "cubic", "poses": { "root": { "pos": [0, -0.8, 0] }, "waist": [-24, 0, 0] } },
+        { "t": 1.5, "poses": { "root": { "pos": [0, 0, 0] }, "rightHip": [0, 0, 0], "leftHip": [0, 0, 0], "rightKnee": [0, 0, 0], "leftKnee": [0, 0, 0], "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "waist": [0, 0, 0] } }
+      ]
+    },
+    "events": [
+      {
+        "name": "Fists", "at": 0.3, "attach": "rightHand", "duration": 0.4,
+        "vfx": { "emitters": [
+          { "name": "Glow", "type": "particles", "texture": "glow", "color": "#ffb35c", "size": [1.2, 0.4], "transparency": [0.3, 1], "lifetime": 0.18, "rate": 40, "speed": 0, "lightEmission": 1 }
+        ] }
+      },
+      {
+        "name": "Slam", "at": 0.68, "attach": "ground", "offset": [0, 0, -1.5], "duration": 0.6,
+        "vfx": { "emitters": [
+          { "name": "Shockwave", "type": "particles", "pos": [0, 0.2, 0], "texture": "ring", "color": "#ffd29a", "size": [[0, 2], [1, 26]], "transparency": [[0, 0.1], [1, 1]], "lifetime": 0.6, "burst": 1, "speed": 0, "orientation": "velocityPerp", "lightEmission": 0.7 },
+          { "name": "Rocks", "type": "particles", "pos": [0, 0.3, 0], "texture": "core", "color": "#5a4636", "size": [0.7, 0.5], "transparency": [[0, 0], [0.8, 0], [1, 1]], "lifetime": [0.8, 1.3], "burst": 28, "speed": [14, 24], "spread": 55, "accel": [0, -60, 0], "rotation": [0, 360], "spin": [-300, 300] },
+          { "name": "Dust", "type": "particles", "pos": [0, 0.5, 0], "shape": "cylinder", "shapeSize": [4, 0.5, 4], "texture": "puff", "color": "#8a7a68", "size": [[0, 2], [1, 7]], "transparency": [[0, 0.35], [1, 1]], "lifetime": [1.2, 1.8], "burst": 26, "speed": [8, 14], "drag": 3, "rotation": [0, 360], "spin": [-30, 30] },
+          { "name": "Flash", "type": "light", "pos": [0, 2, 0], "color": "#ffb06a", "brightness": 5, "range": 18 }
+        ] }
+      }
+    ]
+  },
+  {
+    "name": "Frost Nova",
+    "description": "R6: gather cold, then blast a ring of ice shards outward.",
+    "rig": "R6",
+    "cooldown": 3,
+    "animation": {
+      "loop": false,
+      "keyframes": [
+        { "t": 0, "ease": "cubic", "poses": { "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "neck": [0, 0, 0] } },
+        { "t": 0.35, "ease": "cubic", "poses": { "rightShoulder": [70, 0, -25], "leftShoulder": [70, 0, 25], "neck": [-10, 0, 0] } },
+        { "t": 0.5, "ease": "cubic", "dir": "out", "poses": { "rightShoulder": [10, 0, 95], "leftShoulder": [10, 0, -95], "neck": [12, 0, 0] } },
+        { "t": 1.1, "ease": "cubic", "poses": { "rightShoulder": [5, 0, 85], "leftShoulder": [5, 0, -85] } },
+        { "t": 1.5, "poses": { "rightShoulder": [0, 0, 0], "leftShoulder": [0, 0, 0], "neck": [0, 0, 0] } }
+      ]
+    },
+    "events": [
+      {
+        "name": "Gather", "at": 0.05, "attach": "torso", "duration": 0.45,
+        "vfx": { "emitters": [
+          { "name": "Inward", "type": "particles", "shape": "sphere", "shapeSize": [7, 7, 7], "surface": true, "inward": true, "texture": "sparkle", "color": "#cdeeff", "size": [0.5, 0.1], "transparency": [0.2, 1], "lifetime": 0.4, "rate": 70, "speed": [7, 9], "lightEmission": 1 },
+          { "name": "Core", "type": "particles", "texture": "glow", "color": "#8fd8ff", "size": [[0, 0.5], [1, 2.2]], "transparency": [0.3, 1], "lifetime": 0.25, "rate": 25, "speed": 0, "lightEmission": 1, "locked": true }
+        ] }
+      },
+      {
+        "name": "Nova", "at": 0.5, "attach": "ground", "duration": 0.5,
+        "vfx": { "emitters": [
+          { "name": "Ring", "type": "particles", "pos": [0, 0.25, 0], "texture": "ring", "color": "#bfe9ff", "size": [[0, 2], [1, 24]], "transparency": [[0, 0.05], [1, 1]], "lifetime": 0.6, "burst": 1, "speed": 0, "orientation": "velocityPerp", "lightEmission": 1 },
+          { "name": "Shards", "type": "particles", "pos": [0, 1.5, 0], "shape": "cylinder", "shapeSize": [2, 0.6, 2], "texture": "spark", "color": ["#ffffff", "#7fd3ff"], "size": [0.6, 0.15], "transparency": [[0, 0], [0.7, 0.2], [1, 1]], "lifetime": [0.5, 0.8], "burst": 48, "speed": [28, 40], "drag": 2, "orientation": "velocity", "squash": 2.5, "lightEmission": 0.8 },
+          { "name": "Mist", "type": "particles", "pos": [0, 0.6, 0], "shape": "cylinder", "shapeSize": [3, 0.4, 3], "texture": "smoke", "color": "#d6f2ff", "size": [[0, 2], [1, 6]], "transparency": [[0, 0.5], [1, 1]], "lifetime": [1, 1.6], "burst": 20, "speed": [10, 16], "drag": 3, "rotation": [0, 360] },
+          { "name": "Light", "type": "light", "pos": [0, 2, 0], "color": "#8fdcff", "brightness": 4, "range": 20 }
+        ] }
+      },
+      {
+        "name": "Snowfall", "at": 0.55, "attach": "ground", "duration": 1.4,
+        "vfx": { "emitters": [
+          { "name": "Flakes", "type": "particles", "pos": [0, 8, 0], "shape": "box", "shapeSize": [16, 1, 16], "direction": "down", "texture": "sparkle", "color": "#ffffff", "size": [0.35, 0.2], "transparency": [[0, 1], [0.15, 0.2], [1, 1]], "lifetime": [1.4, 2], "rate": 60, "speed": [3, 5], "spread": 20, "spin": [-90, 90], "lightEmission": 0.6 }
+        ] }
+      }
+    ]
+  },
+  {
+    "name": "Blade Slash",
+    "description": "A fast sweeping slash with a glowing blade trail and a wind arc.",
+    "rig": "R15",
+    "cooldown": 0.8,
+    "animation": {
+      "loop": false,
+      "keyframes": [
+        { "t": 0, "ease": "cubic", "poses": { "rightShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "waist": [0, 0, 0], "leftShoulder": [0, 0, 0] } },
+        { "t": 0.2, "ease": "cubic", "poses": { "rightShoulder": [55, 0, 95], "rightElbow": [25, 0, 0], "waist": [0, -38, 0], "leftShoulder": [25, 0, -20] } },
+        { "t": 0.42, "ease": "cubic", "dir": "out", "poses": { "rightShoulder": [80, 0, -45], "rightElbow": [5, 0, 0], "waist": [0, 38, 0], "leftShoulder": [-20, 0, -10] } },
+        { "t": 0.75, "ease": "cubic", "poses": { "rightShoulder": [70, 0, -40], "waist": [0, 30, 0] } },
+        { "t": 1.1, "poses": { "rightShoulder": [0, 0, 0], "rightElbow": [0, 0, 0], "waist": [0, 0, 0], "leftShoulder": [0, 0, 0] } }
+      ]
+    },
+    "events": [
+      {
+        "name": "Blade Trail", "at": 0.12, "attach": "rightHand", "follow": "part", "duration": 0.55,
+        "vfx": { "emitters": [
+          { "name": "Edge", "type": "trail", "from": [0, -0.6, 0], "to": [0, -3.6, 0], "color": ["#cfeaff", "#3d8bff"], "transparency": [[0, 0.5], [0.5, 0.75], [1, 1]], "widthScale": [[0, 1], [1, 0.3]], "lifetime": 0.16, "lightEmission": 1 },
+          { "name": "Glint", "type": "particles", "pos": [0, -3.6, 0], "texture": "sparkle", "color": "#d6ecff", "size": [0.6, 0], "transparency": [0, 1], "lifetime": 0.25, "rate": 40, "speed": 0, "spin": [-180, 180], "lightEmission": 1 }
+        ] }
+      },
+      {
+        "name": "Wind Arc", "at": 0.4, "attach": "world", "offset": [0, 3, -3], "duration": 0.3,
+        "vfx": { "emitters": [
+          { "name": "Streaks", "type": "particles", "shape": "box", "shapeSize": [6, 2, 1], "direction": "front", "texture": "spark", "color": "#cfe8ff", "size": [0.5, 0.1], "transparency": [[0, 0.2], [1, 1]], "lifetime": [0.25, 0.4], "burst": 26, "speed": [35, 55], "spread": 12, "orientation": "velocity", "squash": 3, "lightEmission": 1 }
+        ] }
+      }
+    ]
+  }
+]

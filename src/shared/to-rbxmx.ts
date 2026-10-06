@@ -20,6 +20,8 @@ import { jointTransform, poseOf, RIGS, type AnimationSpec, type Joint, type Pose
 import { eulerXYZDeg } from "./math.ts";
 import type { ImportOptions } from "./to-luau.ts";
 import { vfxTree, type VfxSpec } from "./vfx.ts";
+import { standaloneTool } from "./ability-studio.ts";
+import type { ResolvedAbility } from "./ability.ts";
 import type { InstNode, PropValue } from "./instance-tree.ts";
 
 type Prop = string;
@@ -460,4 +462,9 @@ export function vfxToRbxmx(spec: VfxSpec, opts: ImportOptions = {}): string {
   const tree = vfxTree(spec);
   tree.props = { ...tree.props, WorldPivot: { cf: { pos: [0, 0, 0] } } };
   return writeTree([tree], forgeAttrs(opts));
+}
+
+/** An ability as one self-contained Tool: drop it into StarterPack and play-test. */
+export function abilityToRbxmx(r: ResolvedAbility, opts: ImportOptions = {}): string {
+  return writeTree([standaloneTool(r)], forgeAttrs(opts));
 }

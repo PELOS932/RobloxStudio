@@ -3,16 +3,23 @@
 
 import { assets, games, shortId } from "./store.ts";
 import { StudioError, type StudioBridge } from "./studio-bridge.ts";
-import { animationToLuau, modelToLuau, scriptToLuau, uiToLuau, vfxToLuau, type ImportOptions } from "../shared/to-luau.ts";
-import { animationToRbxmx, modelToRbxmx, scriptToRbxmx, uiToRbxmx, vfxToRbxmx } from "../shared/to-rbxmx.ts";
+import { abilityToLuau, animationToLuau, modelToLuau, scriptToLuau, uiToLuau, vfxToLuau, type ImportOptions } from "../shared/to-luau.ts";
+import { abilityToRbxmx, animationToRbxmx, modelToRbxmx, scriptToRbxmx, uiToRbxmx, vfxToRbxmx } from "../shared/to-rbxmx.ts";
+import { resolveAbility, type AbilitySpec, type ResolvedAbility } from "../shared/ability.ts";
 import { pullChunkLuau, pullSelectionLuau, PULL_CHUNK } from "../shared/studio-luau.ts";
 import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
 import { sanitizeUiSpec, UiSpecSchema } from "../shared/ui.ts";
 import type { Asset } from "../shared/assets.ts";
 import type { ImportResult, Settings } from "../shared/protocol.ts";
 
+/** An ability with its referenced animation and effects looked up in the library. */
+export function resolveStored(spec: AbilitySpec): ResolvedAbility {
+  return resolveAbility(spec, (id) => assets.get(id));
+}
+
 export function buildLuau(asset: Asset, opts: ImportOptions) {
   const o = { ...opts, assetId: asset.id, version: asset.version };
+  if (asset.kind === "ability") return abilityToLuau(resolveStored(asset.spec), o);
   if (asset.kind === "model") return modelToLuau(asset.spec, o);
   if (asset.kind === "ui") return uiToLuau(asset.spec, o);
   if (asset.kind === "animation") return animationToLuau(asset.spec, o);
@@ -22,6 +29,7 @@ export function buildLuau(asset: Asset, opts: ImportOptions) {
 
 export function buildRbxmx(asset: Asset, opts: ImportOptions): string {
   const o = { ...opts, assetId: asset.id, version: asset.version };
+  if (asset.kind === "ability") return abilityToRbxmx(resolveStored(asset.spec), o);
   if (asset.kind === "model") return modelToRbxmx(asset.spec, o);
   if (asset.kind === "ui") return uiToRbxmx(asset.spec, o);
   if (asset.kind === "animation") return animationToRbxmx(asset.spec, o);
