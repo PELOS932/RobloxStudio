@@ -7,7 +7,7 @@
 // as is. Ranges ([min, max]) pick a random value per particle.
 
 import { z } from "zod";
-import { hexToRgb } from "./math.ts";
+import { eulerXYZDeg, hexToRgb, mul } from "./math.ts";
 import type { Mat3, RGB, Vec3 } from "./math.ts";
 import type { ColorKey, InstNode, NumKey, PropValue } from "./instance-tree.ts";
 
@@ -163,12 +163,38 @@ export const SparklesSchema = z.object({
   color: hex.optional(),
 });
 
-export const EmitterSchema = z.discriminatedUnion("type", [ParticlesSchema, BeamSchema, TrailSchema, LightSchema, FireSchema, SmokeSchema, SparklesSchema]);
+/** Ready-made mesh effects (see MESH_PRESETS). */
+export const MESH_PRESET_NAMES = ["shockDome", "orb", "pillar", "ringBurst", "shield"] as const;
+export type MeshPreset = (typeof MESH_PRESET_NAMES)[number];
+const size3 = z.union([z.number(), vec3]);
+
+/** A part that grows, fades, changes colour and spins: shock domes, energy orbs, light pillars, rings. */
+export const MeshSchema = z.object({
+  ...common,
+  type: z.literal("mesh"),
+  preset: z.enum(MESH_PRESET_NAMES).optional().describe("start from a ready-made mesh effect; other fields override it"),
+  shape: z.enum(["sphere", "cylinder", "block", "ring"]).optional().describe("default sphere; cylinders stand upright (size [diameter, height, diameter]); ring lies flat ([diameter, 0, diameter])"),
+  material: z.enum(["neon", "forcefield", "glass"]).optional().describe("default neon"),
+  color: ColorSeqSchema.optional(),
+  size: size3.optional().describe("studs at the start (a number for all sides), default 1"),
+  to: size3.optional().describe("size at the end of its life, default the same"),
+  transparency: NumberSeqSchema.optional().describe("over its life, default fades out [0, 1]"),
+  life: z.number().min(0.05).max(10).optional().describe("seconds, default 0.6"),
+  delay: z.number().min(0).max(30).optional(),
+  loop: z.boolean().optional().describe("repeat forever instead of once when played"),
+  pulse: z.boolean().optional().describe("with loop: grow and shrink back (breathing) instead of restarting"),
+  ease: z.enum(["linear", "out", "in", "inOut"]).optional().describe("how the size changes, default out (fast, then slow)"),
+  rot: vec3.optional().describe("degrees"),
+  spin: vec3.optional().describe("degrees per second"),
+});
+
+export const EmitterSchema = z.discriminatedUnion("type", [ParticlesSchema, BeamSchema, TrailSchema, LightSchema, FireSchema, SmokeSchema, SparklesSchema, MeshSchema]);
 export type VfxEmitter = z.infer<typeof EmitterSchema>;
 export type VfxParticles = z.infer<typeof ParticlesSchema>;
 export type VfxBeam = z.infer<typeof BeamSchema>;
 export type VfxTrail = z.infer<typeof TrailSchema>;
 export type VfxLight = z.infer<typeof LightSchema>;
+export type VfxMesh = z.infer<typeof MeshSchema>;
 export type NumberSeq = z.infer<typeof NumberSeqSchema>;
 export type ColorSeq = z.infer<typeof ColorSeqSchema>;
 
@@ -296,6 +322,16 @@ export const PARTICLE_PRESETS: Record<ParticlePreset, PresetFields> = {
   electric: { texture: "spark", color: "#d8f4ff", size: [0.3, 0], transparency: [0, 1], lifetime: 0.4, rate: 40, speed: [4, 9], spread: 180, lightEmission: 1 },
 };
 
+type MeshFields = Omit<VfxMesh, "name" | "type" | "preset" | "pos" | "enabled">;
+
+export const MESH_PRESETS: Record<MeshPreset, MeshFields> = {
+  shockDome: { shape: "sphere", material: "neon", color: "#9fe8ff", size: 1, to: 16, transparency: [[0, 0.2], [1, 1]], life: 0.5 },
+  orb: { shape: "sphere", material: "neon", color: "#7fd0ff", size: 1.6, to: 2.1, transparency: 0.15, life: 0.9, loop: true, pulse: true, ease: "inOut" },
+  pillar: { shape: "cylinder", material: "neon", color: "#aef1ff", size: [0.6, 14, 0.6], to: [3.5, 14, 3.5], transparency: [[0, 0.1], [1, 1]], life: 0.6 },
+  ringBurst: { shape: "ring", material: "neon", color: "#ffd27a", size: [2, 0.05, 2], to: [20, 0.05, 20], transparency: [[0, 0], [1, 1]], life: 0.45 },
+  shield: { shape: "sphere", material: "forcefield", color: "#6fb8ff", size: 7, to: 7.3, transparency: 0.55, life: 1.2, loop: true, pulse: true, ease: "inOut", spin: [0, 40, 0] },
+};
+
 /** A preset emitter with the given fields on top (a burst makes it a one-shot, a rate continuous). */
 function expandParticlePreset(e: VfxParticles): VfxParticles {
   if (!e.preset) return e;
@@ -313,7 +349,11 @@ function expandParticlePreset(e: VfxParticles): VfxParticles {
 export function sanitizeVfxSpec(spec: VfxSpec): VfxSpec {
   const used = new Set<string>();
   const emitters = spec.emitters.map((raw) => {
-    const e = raw.type === "particles" ? expandParticlePreset(raw) : raw;
+    let e: VfxEmitter = raw.type === "particles" ? expandParticlePreset(raw) : raw;
+    if (e.type === "mesh" && e.preset) {
+      const { preset, ...own } = e;
+      e = { ...structuredClone(MESH_PRESETS[preset]), ...own } as VfxEmitter;
+    }
     let name = e.name.trim() || e.type;
     for (let i = 2; used.has(name); i++) name = `${e.name}${i}`;
     used.add(name);
@@ -331,27 +371,35 @@ export function previewMotion(spec: VfxSpec): NonNullable<VfxSpec["motion"]> {
   return spec.emitters.some((e) => e.type === "trail") ? "swing" : "none";
 }
 
-/** One-shot effects: every particle emitter bursts and none emit continuously. */
+/** One-shot effects: every particle emitter bursts and every mesh plays once (none emit continuously). */
 export function isOneShot(spec: VfxSpec): boolean {
   const ps = spec.emitters.filter((e): e is VfxParticles => e.type === "particles");
-  return ps.length > 0 && ps.every((p) => p.burst !== undefined && !p.rate);
+  const ms = spec.emitters.filter((e): e is VfxMesh => e.type === "mesh");
+  return ps.length + ms.length > 0 && ps.every((p) => p.burst !== undefined && !p.rate) && ms.every((m) => !m.loop);
 }
 
-/** Seconds a one-shot takes to play out (bursts plus their longest lifetime). */
+/** Seconds a one-shot takes to play out (bursts plus their longest lifetime, meshes' lives). */
 export function oneShotLength(spec: VfxSpec): number {
   let t = 0;
   for (const e of spec.emitters) {
+    if (e.type === "mesh" && !e.loop) t = Math.max(t, (e.delay ?? 0) + (e.life ?? MESH_DEFAULT_LIFE));
     if (e.type !== "particles" || e.burst === undefined) continue;
     t = Math.max(t, (e.delay ?? 0) + rangeOf(e.lifetime, PARTICLE_DEFAULTS.lifetime)[1]);
   }
   return t || 1;
 }
 
+export const MESH_DEFAULT_LIFE = 0.6;
+
+/** A mesh's size as [x, y, z] (a number means all sides). */
+export const meshSize = (v: number | number[] | undefined, fallback: Vec3 = [1, 1, 1]): Vec3 =>
+  v === undefined ? fallback : typeof v === "number" ? [v, v, v] : (v as Vec3);
+
 export function vfxSummary(spec: VfxSpec): string {
   const counts = new Map<string, number>();
   for (const e of spec.emitters) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
-  const label: Record<string, string> = { particles: "emitter", beam: "beam", trail: "trail", light: "light", fire: "fire", smoke: "smoke", sparkles: "sparkles" };
-  return [...counts].map(([k, n]) => `${n} ${label[k]}${n > 1 && k !== "sparkles" && k !== "smoke" && k !== "fire" ? "s" : ""}`).join(" · ");
+  const label: Record<string, string> = { particles: "emitter", beam: "beam", trail: "trail", light: "light", fire: "fire", smoke: "smoke", sparkles: "sparkles", mesh: "mesh" };
+  return [...counts].map(([k, n]) => `${n} ${label[k]}${n > 1 && k !== "sparkles" && k !== "smoke" && k !== "fire" ? (k === "mesh" ? "es" : "s") : ""}`).join(" · ");
 }
 
 // ---------------------------------------------------------------------------
@@ -437,7 +485,7 @@ function mapColorSeq(seq: ColorSeq | undefined, fn: (h: string) => string): Colo
 
 function emitterColors(e: VfxEmitter, fn: (h: string) => string): VfxEmitter {
   const out = { ...e } as Record<string, unknown>;
-  if (e.type === "particles" || e.type === "beam" || e.type === "trail") out.color = mapColorSeq(e.color, fn);
+  if (e.type === "particles" || e.type === "beam" || e.type === "trail" || e.type === "mesh") out.color = mapColorSeq(e.color, fn);
   else if (e.type === "fire") {
     out.color = fn(e.color ?? FIRE_DEFAULTS.color);
     out.secondaryColor = fn(e.secondaryColor ?? FIRE_DEFAULTS.secondaryColor);
@@ -497,6 +545,7 @@ export function vfxTail(spec: VfxSpec): number {
     if (e.type === "particles") t = Math.max(t, (e.delay ?? 0) + rangeOf(e.lifetime, PARTICLE_DEFAULTS.lifetime)[1] / (e.timeScale || 1));
     else if (e.type === "trail") t = Math.max(t, e.lifetime ?? 0.5);
     else if (e.type === "smoke") t = Math.max(t, 6);
+    else if (e.type === "mesh") t = Math.max(t, (e.delay ?? 0) + (e.life ?? MESH_DEFAULT_LIFE));
     else if (e.type === "fire" || e.type === "sparkles") t = Math.max(t, 1.5);
     else t = Math.max(t, 0.25);
   }
@@ -518,6 +567,8 @@ function scaleEmitter(e: VfxEmitter, k: number): VfxEmitter {
       return { ...e, pos, size: Math.min(30, Math.max(2, (e.size ?? 5) * k)) };
     case "smoke":
       return { ...e, pos, size: Math.min(100, (e.size ?? 1) * k) };
+    case "mesh":
+      return { ...e, pos, size: meshSize(e.size).map((v) => v * k), ...(e.to !== undefined ? { to: meshSize(e.to).map((v) => v * k) } : {}) } as VfxEmitter;
     default:
       return { ...e, pos } as VfxEmitter;
   }
@@ -546,8 +597,81 @@ export const FIRE_DEFAULTS = { color: "#ec8b46", secondaryColor: "#8b5037", heat
 export const SMOKE_DEFAULTS = { color: "#ffffff", opacity: 0.5, riseVelocity: 1, size: 1 };
 export const SPARKLES_DEFAULT = "#9019ff";
 
+/**
+ * Animates the mesh effects (parts with a ForgeMesh attribute) of a model: one-shots once
+ * (loops = false) or the looping ones forever (loops = true). Shared by every generated script.
+ */
+export const MESH_LUAU = `-- Mesh effects: parts that grow, fade, change colour and spin (settings in their ForgeMesh attribute).
+local function forgeMeshes(model, loops)
+	local HttpService = game:GetService("HttpService")
+	local RunService = game:GetService("RunService")
+	local function sample(keys, f)
+		if f <= keys[1][1] then return keys[1] end
+		for i = 2, #keys do
+			local b = keys[i]
+			if f <= b[1] then
+				local a = keys[i - 1]
+				local k = (f - a[1]) / math.max(1e-6, b[1] - a[1])
+				local out = {}
+				for j = 1, #a do out[j] = a[j] + (b[j] - a[j]) * k end
+				return out
+			end
+		end
+		return keys[#keys]
+	end
+	local function eased(f, kind)
+		if kind == "linear" then return f end
+		if kind == "in" then return f * f * f end
+		if kind == "inOut" then return if f < 0.5 then 4 * f * f * f else 1 - (2 - 2 * f) ^ 3 / 2 end
+		return 1 - (1 - f) ^ 3
+	end
+	for _, part in model:GetDescendants() do
+		local raw = part:IsA("BasePart") and part:GetAttribute("ForgeMesh")
+		if raw then
+			local ok, m = pcall(function() return HttpService:JSONDecode(raw) end)
+			if ok and (m.loop == true) == loops then
+				local start = os.clock() + (m.delay or 0)
+				local offset = model:GetPivot():ToObjectSpace(part.CFrame)
+				local conn = nil
+				conn = RunService.Heartbeat:Connect(function()
+					if not part.Parent then
+						conn:Disconnect()
+						return
+					end
+					local age = os.clock() - start
+					-- Rings show a Decal on an invisible part: fade and colour the Decal.
+					local skin = part:FindFirstChild("Ring") or part
+					if age < 0 then
+						skin.Transparency = 1
+						return
+					end
+					if not m.loop and age >= m.life then
+						skin.Transparency = 1
+						conn:Disconnect()
+						return
+					end
+					local f = (age % m.life) / m.life
+					if m.pulse then f = 1 - math.abs(1 - 2 * f) end
+					local k = eased(f, m.ease)
+					part.Size = Vector3.new(m.from[1] + (m.to[1] - m.from[1]) * k, m.from[2] + (m.to[2] - m.from[2]) * k, m.from[3] + (m.to[3] - m.from[3]) * k)
+					skin.Transparency = sample(m.t, f)[2]
+					if m.c then
+						local c = sample(m.c, f)
+						if skin == part then part.Color = Color3.fromRGB(c[2], c[3], c[4]) else skin.Color3 = Color3.fromRGB(c[2], c[3], c[4]) end
+					end
+					local spin = CFrame.new()
+					if m.spin then spin = CFrame.Angles(math.rad(m.spin[1] * age), math.rad(m.spin[2] * age), math.rad(m.spin[3] * age)) end
+					part.CFrame = model:GetPivot() * CFrame.new(offset.Position) * spin * offset.Rotation
+				end)
+			end
+		end
+	end
+end
+`;
+
 const PLAY_SOURCE = `-- Plays this effect's one-shot bursts: require(effect.Play)()
 local effect = script.Parent
+${MESH_LUAU}
 return function()
 	for _, e in effect:GetDescendants() do
 		if e:IsA("ParticleEmitter") and e:GetAttribute("EmitCount") then
@@ -556,8 +680,92 @@ return function()
 			end)
 		end
 	end
+	forgeMeshes(effect, false)
 end
 `;
+
+const LOOP_SOURCE = `-- Keeps this effect's looping mesh effects moving.
+${MESH_LUAU}
+forgeMeshes(script.Parent, true)
+`;
+
+const MESH_MATERIALS = { neon: ["Neon", 288], forcefield: ["ForceField", 1584], glass: ["Glass", 1568] } as const;
+/** Roblox cylinders lie along X; mesh cylinders stand up. */
+const STAND_UP: Mat3 = [0, -1, 0, 1, 0, 0, 0, 0, 1];
+
+function meshPart(e: VfxMesh): InstNode {
+  const shape = e.shape ?? "sphere";
+  if (shape === "ring") return ringPart(e);
+  const toPart = (v: Vec3): Vec3 => (shape === "cylinder" ? [v[1], v[0], v[2]] : v);
+  const from = toPart(meshSize(e.size));
+  const to = toPart(meshSize(e.to ?? e.size));
+  const settings = meshSettings(e, from, to);
+  const tKeys = settings.t as number[][];
+  const cKeys = colorKeys(e.color, "#ffffff");
+  const rot = mul(eulerXYZDeg(e.rot as Vec3 | undefined), shape === "cylinder" ? STAND_UP : [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const [matName, matToken] = MESH_MATERIALS[e.material ?? "neon"];
+  const props: Record<string, PropValue> = {
+    Anchored: true, CanCollide: false, CanTouch: false, CanQuery: false, CastShadow: false,
+    Material: { enum: "Material", item: matName, token: matToken },
+    Color: { rgb: cKeys[0].c },
+    Size: { v3: from },
+    CFrame: { cf: { pos: (e.pos ?? [0, 0, 0]) as Vec3, rot } },
+    // Hidden until played; loops show from the start.
+    Transparency: e.loop ? tKeys[0][1] : 1,
+  };
+  if (shape === "cylinder") props.Shape = en("PartType", ["Cylinder", 2]);
+  return {
+    className: "Part",
+    name: e.name,
+    props,
+    attrs: { ForgeMesh: JSON.stringify(settings) },
+    children: shape === "sphere" ? [{ className: "SpecialMesh", name: "Mesh", props: { MeshType: en("MeshType", ["Sphere", 3]) } }] : [],
+  };
+}
+
+/** Settings the mesh runtime reads (sizes in the part's own axes). */
+function meshSettings(e: VfxMesh, from: Vec3, to: Vec3) {
+  const r = (n: number) => Math.round(n * 1000) / 1000;
+  const cKeys = colorKeys(e.color, "#ffffff");
+  return {
+    life: e.life ?? MESH_DEFAULT_LIFE,
+    ...(e.delay ? { delay: e.delay } : {}),
+    ...(e.loop ? { loop: true } : {}),
+    ...(e.pulse ? { pulse: true } : {}),
+    ease: e.ease ?? "out",
+    from: from.map(r),
+    to: to.map(r),
+    t: numberKeys(e.transparency ?? [0, 1], 0).map((k) => [r(k.t), r(k.v)]),
+    ...(cKeys.length > 1 && cKeys.some((k) => k.c.join() !== cKeys[0].c.join()) ? { c: cKeys.map((k) => [r(k.t), ...k.c.map(Math.round)]) } : {}),
+    ...(e.spin ? { spin: e.spin } : {}),
+  };
+}
+
+/**
+ * A flat ring: Roblox has no ring part, so (like hand-made VFX) it is the shockwave ring texture
+ * as a Decal on top of a thin invisible part that grows; the Decal fades and takes the colour.
+ */
+function ringPart(e: VfxMesh): InstNode {
+  const thin = (v: Vec3): Vec3 => [v[0], 0.05, v[2]];
+  const from = thin(meshSize(e.size, [2, 0.05, 2])), to = thin(meshSize(e.to ?? e.size, [2, 0.05, 2]));
+  const settings = meshSettings(e, from, to);
+  const tKeys = settings.t as number[][];
+  const first = colorKeys(e.color, "#ffffff")[0].c;
+  return {
+    className: "Part",
+    name: e.name,
+    props: {
+      ...hiddenPart(from, (e.pos ?? [0, 0, 0]) as Vec3),
+      CFrame: { cf: { pos: (e.pos ?? [0, 0, 0]) as Vec3, rot: eulerXYZDeg(e.rot as Vec3 | undefined) } },
+    },
+    attrs: { ForgeMesh: JSON.stringify(settings) },
+    children: [{
+      className: "Decal",
+      name: "Ring",
+      props: { Texture: { content: VFX_TEXTURES.ring }, Face: en("NormalId", ["Top", 1]), Color3: { rgb: first }, Transparency: e.loop ? tKeys[0][1] : 1 },
+    }],
+  };
+}
 
 function particleProps(e: VfxParticles): { props: Record<string, PropValue>; attrs?: Record<string, number> } {
   const spread = e.spread === undefined ? [0, 0] : typeof e.spread === "number" ? [e.spread, e.spread] : e.spread;
@@ -722,10 +930,15 @@ export function vfxTree(spec: VfxSpec): InstNode {
       case "sparkles":
         root.children!.push(at(e.name, e.pos, [{ className: "Sparkles", name: e.name, props: { SparkleColor: rgb(e.color ?? SPARKLES_DEFAULT), ...off } }]));
         break;
+      case "mesh":
+        if (e.enabled !== false) model.children!.push(meshPart(e));
+        break;
     }
   }
-  if (spec.emitters.some((e) => e.type === "particles" && e.burst !== undefined)) {
+  const meshes = spec.emitters.filter((e): e is VfxMesh => e.type === "mesh" && e.enabled !== false);
+  if (spec.emitters.some((e) => e.type === "particles" && e.burst !== undefined) || meshes.some((m) => !m.loop)) {
     model.children!.push({ className: "ModuleScript", name: "Play", source: PLAY_SOURCE });
   }
+  if (meshes.some((m) => m.loop)) model.children!.push({ className: "Script", name: "MeshLoop", source: LOOP_SOURCE });
   return model;
 }

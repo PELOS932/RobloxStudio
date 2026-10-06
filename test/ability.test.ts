@@ -237,6 +237,21 @@ describe.skipIf(!luneAvailable)("casting abilities in Studio (Play module run in
     expect(blade.removed!).toBeLessThan(1.3);
   });
 
+  it("mesh effects grow, show and fade when an ability plays them", () => {
+    const spec = sanitizeAbilitySpec(expandAbilityInput({
+      name: "Nova", rig: "R15",
+      events: [{ at: 0.2, attach: "ground", duration: 0.2, vfx: { preset: "energyBurst" } }],
+    }));
+    const run = cast(spec, 2);
+    expect(run.errors).toEqual([]);
+    const burst = run.effects.find((e) => e.name === "Energy Burst")! as unknown as { meshes: Record<string, { maxSize: number; minT: number; lastT: number }> };
+    expect(burst.meshes.Dome.maxSize).toBeGreaterThan(14); // 1 → 16 studs
+    expect(burst.meshes.Dome.minT).toBeLessThan(0.3);
+    expect(burst.meshes.Core.maxSize).toBeCloseTo(2.5, 0); // shrinks from 2.5
+    expect(burst.meshes.Pillar.maxSize).toBe(14); // a 14-stud pillar widening
+    for (const m of Object.values(burst.meshes)) expect(m.lastT).toBe(1); // hidden again when done
+  });
+
   it.each(starters.map((s) => [s.name, s] as const))("%s: every effect appears on cue without script errors", (_name, spec) => {
     const run = cast(spec);
     expect(run.errors).toEqual([]);

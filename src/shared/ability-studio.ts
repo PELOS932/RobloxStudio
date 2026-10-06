@@ -10,7 +10,7 @@ import { ATTACH, SUMMON_DEFAULTS, type ResolvedAbility, type ResolvedProp, type 
 import { eulerXYZDeg, hexToRgb } from "./math.ts";
 import { toNativeModel } from "./model.ts";
 import { MATERIAL_ENUM, NORMAL_ID_ENUM, PART_TYPE_ENUM } from "./roblox-data.ts";
-import { vfxTree } from "./vfx.ts";
+import { MESH_LUAU, vfxTree } from "./vfx.ts";
 import type { InstNode, PropValue } from "./instance-tree.ts";
 
 const POSE_STYLE = { linear: ["Linear", 0], constant: ["Constant", 1], elastic: ["Elastic", 2], bounce: ["Bounce", 4], cubic: ["CubicV2", 5] } as const;
@@ -255,7 +255,8 @@ local function animationTrack(humanoid)
 	return track
 end
 
--- One-shot emitters fire their EmitCount (after EmitDelay).
+${MESH_LUAU}
+-- One-shot emitters fire their EmitCount (after EmitDelay); one-shot meshes play.
 local function burst(model)
 	for _, e in model:GetDescendants() do
 		if e:IsA("ParticleEmitter") and e:GetAttribute("EmitCount") then
@@ -264,6 +265,7 @@ local function burst(model)
 			end)
 		end
 	end
+	forgeMeshes(model, false)
 end
 
 -- Stop emitting and remove the effect once its last particles are gone.
@@ -281,6 +283,8 @@ local function stop(model)
 			tail = math.max(tail, 5)
 		elseif e:IsA("Beam") or e:IsA("Light") or e:IsA("Fire") or e:IsA("Sparkles") then
 			e.Enabled = false
+		elseif e:IsA("BasePart") and e:GetAttribute("ForgeMesh") then
+			tail = math.max(tail, 0.6)
 		end
 	end
 	Debris:AddItem(model, tail + 0.2)

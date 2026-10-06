@@ -6,10 +6,12 @@
 import * as THREE from "three";
 import { decodeDds } from "../../shared/dds.ts";
 import {
-  colorKeys, DIRECTIONS, FIRE_DEFAULTS, isOneShot, numberKeys, PARTICLE_DEFAULTS, previewMotion, rangeOf, sampleColor, sampleNumber,
-  SMOKE_DEFAULTS, SPARKLES_DEFAULT, texturePreset, textureUrl, type ColorKey, type NumKey, type TexturePreset, type VfxBeam,
-  type VfxParticles, type VfxSpec, type VfxTrail,
+  colorKeys, DIRECTIONS, FIRE_DEFAULTS, isOneShot, MESH_DEFAULT_LIFE, meshSize, numberKeys, PARTICLE_DEFAULTS, previewMotion, rangeOf, sampleColor,
+  sampleNumber, SMOKE_DEFAULTS, SPARKLES_DEFAULT, texturePreset, textureUrl, type ColorKey, type NumKey, type TexturePreset, type VfxBeam,
+  type VfxMesh, type VfxParticles, type VfxSpec, type VfxTrail,
 } from "../../shared/vfx.ts";
+import type { RGB, Vec3 } from "../../shared/math.ts";
+import { markGlow } from "./selective-bloom.ts";
 
 const DEG = Math.PI / 180;
 
@@ -757,6 +759,89 @@ function beamSim(e: VfxBeam): Sim {
   };
 }
 
+// Mesh effects: a sphere, upright cylinder or block that grows, fades, changes colour and spins.
+const sphereGeo = new THREE.SphereGeometry(0.5, 40, 24);
+const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 48, 1);
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const ringGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+
+function meshSim(e: VfxMesh): Sim {
+  const ring = e.shape === "ring";
+  const geo = ring ? ringGeo : e.shape === "cylinder" ? cylinderGeo : e.shape === "block" ? boxGeo : sphereGeo;
+  const kind = e.material ?? "neon";
+  // Rings are the shockwave ring texture on a flat quad (a Decal on a thin part in Studio).
+  const mat: THREE.Material = ring
+    ? markGlow(new THREE.MeshBasicMaterial({ map: textureFor("ring"), transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }))
+    : kind === "glass"
+      ? new THREE.MeshPhysicalMaterial({ roughness: 0.05, transparent: true, depthWrite: false })
+      : markGlow(new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: kind === "forcefield" ? THREE.DoubleSide : THREE.FrontSide, blending: kind === "forcefield" ? THREE.AdditiveBlending : THREE.NormalBlending }));
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.matrixAutoUpdate = false;
+  mesh.visible = false;
+  const from = meshSize(e.size), to = meshSize(e.to ?? e.size);
+  const tKeys = numberKeys(e.transparency ?? [0, 1], 0);
+  const cKeys = colorKeys(e.color, "#ffffff");
+  const life = e.life ?? MESH_DEFAULT_LIFE;
+  const base = new THREE.Matrix4().makeTranslation(...((e.pos ?? [0, 0, 0]) as Vec3)).multiply(
+    new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(((e.rot?.[0] ?? 0) * Math.PI) / 180, ((e.rot?.[1] ?? 0) * Math.PI) / 180, ((e.rot?.[2] ?? 0) * Math.PI) / 180, "XYZ")),
+  );
+  const ease = (f: number) => (e.ease === "linear" ? f : e.ease === "in" ? f * f * f : e.ease === "inOut" ? (f < 0.5 ? 4 * f * f * f : 1 - (2 - 2 * f) ** 3 / 2) : 1 - (1 - f) ** 3);
+  const rgb: RGB = [0, 0, 0];
+  // Loops run from the start; one-shots run when burst. -1: not playing.
+  let started = e.loop ? 0 : -1;
+  let clock = 0;
+  let fadeOut = 1;
+  let stopped = false;
+  const m = new THREE.Matrix4();
+  return {
+    objects: [mesh],
+    update(dt, root) {
+      clock += dt;
+      if (stopped) fadeOut = Math.max(0, fadeOut - dt / 0.25);
+      const age = started < 0 ? -1 : clock - started - (e.delay ?? 0);
+      if (age < 0 || (!e.loop && age >= life) || fadeOut <= 0 || e.enabled === false) {
+        mesh.visible = false;
+        return;
+      }
+      let f = (age % life) / life;
+      if (e.pulse) f = 1 - Math.abs(1 - 2 * f);
+      const k = ease(f);
+      const sx = from[0] + (to[0] - from[0]) * k, sy = from[1] + (to[1] - from[1]) * k, sz = from[2] + (to[2] - from[2]) * k;
+      const spin = e.spin
+        ? new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler((e.spin[0] * age * Math.PI) / 180, (e.spin[1] * age * Math.PI) / 180, (e.spin[2] * age * Math.PI) / 180, "XYZ"))
+        : null;
+      m.copy(root).multiply(base);
+      if (spin) m.multiply(spin);
+      m.multiply(new THREE.Matrix4().makeScale(sx, sy, sz));
+      mesh.matrix.copy(m);
+      mesh.matrixWorldNeedsUpdate = true;
+      sampleColor(cKeys, f, rgb);
+      // Neon glows: its colour is pushed past white so the glow pass picks it up.
+      const boost = ring ? 1.4 : kind === "neon" ? 1.6 : kind === "forcefield" ? 0.9 : 1;
+      (mat as THREE.MeshBasicMaterial).color.setRGB((rgb[0] / 255) * boost, (rgb[1] / 255) * boost, (rgb[2] / 255) * boost, THREE.SRGBColorSpace);
+      const shown = (1 - sampleNumber(tKeys, f)) * fadeOut;
+      mat.opacity = ring ? shown : kind === "forcefield" ? shown * 0.45 : kind === "glass" ? shown * 0.5 : shown;
+      mesh.visible = mat.opacity > 0.003;
+    },
+    burst() {
+      if (!e.loop) started = clock;
+    },
+    count: () => (mesh.visible ? 1 : 0),
+    extend(box) {
+      if (!mesh.visible) return;
+      mesh.updateMatrixWorld(true);
+      box.union(new THREE.Box3().setFromObject(mesh));
+    },
+    stop() {
+      stopped = true;
+    },
+    continuous: () => !!e.loop && !stopped,
+    dispose() {
+      mat.dispose();
+    },
+  };
+}
+
 function trailSim(e: VfxTrail): Sim {
   const MAX = 160;
   const geo = stripGeometry(MAX - 1);
@@ -876,6 +961,7 @@ export function createVfx(spec: VfxSpec, rng: Rng = Math.random, opts: VfxOption
     if (e.type === "particles") sims.push(particleSim(particleConfig(e), rng));
     else if (e.type === "beam") sims.push(beamSim(e));
     else if (e.type === "trail") sims.push(trailSim(e));
+    else if (e.type === "mesh") sims.push(meshSim(e));
     else if (e.type === "light" && e.enabled !== false) {
       const color = new THREE.Color(e.color ?? "#ffffff");
       const range = e.range ?? 8;

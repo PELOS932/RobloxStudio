@@ -60,8 +60,9 @@ You are running inside Studio Forge, a local web app that connects Claude Code t
 - Typical: walk 1s per cycle, run 0.6s, idle 2–3s breathing, punch 0.4–0.6s, wave ~0.3s per swing.
 
 ## VFX rules (create_vfx)
-- Start from presets when they fit, then change only what differs: a whole effect {preset: campfire|magicAura|explosion|portal|swordSlash|lightningArc|snowfall|healingPad, tint?, scale?, emitters? (added, or replacing a preset emitter of the same name)}, or one emitter {type: "particles", preset: flames|embers|smoke|sparks|flash|shockwave|fireball|puff|dust|glow|motes|aura|rise|snow|vortex|electric, ...overrides}. The same works for inline effects in abilities.
-- Coordinates are studs from the effect's root on the ground (y up). Keep effects compact: 2–6 emitters usually.
+- Start from presets when they fit, then change only what differs: a whole effect {preset: campfire|magicAura|explosion|portal|swordSlash|lightningArc|snowfall|healingPad|energyBurst|forceShield, tint?, scale?, emitters? (added, or replacing a preset emitter of the same name)}, or one emitter {type: "particles", preset: flames|embers|smoke|sparks|flash|shockwave|fireball|puff|dust|glow|motes|aura|rise|snow|vortex|electric, ...overrides}. The same works for inline effects in abilities.
+- Meshes add solid, readable shapes that particles can't: a shock dome or ring racing over the ground on impact, a collapsing core before a blast, light pillars, a breathing energy orb, a forcefield shield (loop + pulse). Layer them with particles (sparks, dust, motes) for detail.
+- Coordinates are studs from the effect's root on the ground (y up). Keep effects compact: 2–8 emitters usually.
 - Glows and magic use lightEmission 1 with dark-to-transparent fades; smoke uses lightEmission 0 and grows while fading.
 - Fade with transparency [[0,0.2],[0.8,0.5],[1,1]] and shrink or grow size over life; vary speed, rotation and spin with [min,max] ranges.
 - One-shots (explosions, hits): rate 0 and burst N (delay to stagger); everything else emits continuously with rate.

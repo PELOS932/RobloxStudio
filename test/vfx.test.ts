@@ -47,7 +47,7 @@ describe("vfx specs", () => {
   });
 
   it("ships valid starter effects", () => {
-    expect(starters.map((s) => s.name)).toEqual(["Campfire", "Magic Aura", "Explosion", "Portal", "Sword Slash Trail", "Lightning Arc", "Snowfall", "Healing Pickup"]);
+    expect(starters.map((s) => s.name)).toEqual(["Campfire", "Magic Aura", "Explosion", "Portal", "Sword Slash Trail", "Lightning Arc", "Snowfall", "Healing Pickup", "Energy Burst", "Force Shield"]);
     expect(isOneShot(byName("Explosion"))).toBe(true);
     expect(isOneShot(byName("Campfire"))).toBe(false);
     expect(oneShotLength(byName("Explosion"))).toBeCloseTo(3.15);
@@ -125,6 +125,33 @@ describe("vfx specs", () => {
     expect(spec.emitters[3]).toMatchObject({ color: "#66ccff", brightness: 2.5, range: 16 });
     expect(() => expandVfxInput({ name: "Empty" })).toThrow(/emitters, or a preset/);
     expect(applyVfxEdit(byName("Campfire"), { tint: "#3fa0ff" }).spec.emitters[3]).not.toMatchObject({ color: "#ff9a4a" });
+  });
+
+  it("builds mesh effects as parts that a Play module or a loop script animates", () => {
+    const burst = vfxTree(byName("Energy Burst"));
+    const dome = find(burst, "Dome", "Part")!;
+    const settings = JSON.parse(String(dome.attrs!.ForgeMesh));
+    expect(settings).toMatchObject({ life: 0.5, delay: 0.2, ease: "out", from: [1, 1, 1], to: [16, 16, 16] });
+    expect(settings.c).toHaveLength(2); // colour changes from white-blue to blue
+    expect(dome.props).toMatchObject({ Transparency: 1, Material: { item: "Neon" }, Anchored: true, CanCollide: false });
+    expect(find(dome, "Mesh", "SpecialMesh")!.props).toMatchObject({ MeshType: { item: "Sphere" } });
+    // Upright cylinders: Roblox cylinders lie along X, so the part is turned and its size reordered.
+    const pillar = find(burst, "Pillar", "Part")!;
+    expect(JSON.parse(String(pillar.attrs!.ForgeMesh))).toMatchObject({ from: [14, 0.6, 0.6], to: [14, 3.5, 3.5] });
+    expect(pillar.props).toMatchObject({ Shape: { item: "Cylinder" }, CFrame: { cf: { pos: [0, 7, 0], rot: [0, -1, 0, 1, 0, 0, 0, 0, 1] } } });
+    expect(burst.children!.map((c) => c.name)).toContain("Play");
+    expect(isOneShot(byName("Energy Burst"))).toBe(true);
+    // Looping meshes keep moving on their own and show from the start.
+    const shield = vfxTree(byName("Force Shield"));
+    expect(shield.children!.map((c) => c.name)).toEqual(expect.arrayContaining(["MeshLoop"]));
+    expect(shield.children!.map((c) => c.name)).not.toContain("Play");
+    expect(find(shield, "Shell", "Part")!.props!.Transparency).toBe(0.55);
+    // Rings: the ring texture as a Decal on top of a thin invisible part.
+    const ripple = find(shield, "Ripple", "Part")!;
+    expect(ripple.props).toMatchObject({ Transparency: 1 });
+    expect(find(ripple, "Ring", "Decal")!.props).toMatchObject({ Face: { item: "Top" }, Texture: { content: "rbxasset://textures/particles/explosion01_shockwave_main.dds" } });
+    expect(isOneShot(byName("Force Shield"))).toBe(false);
+    expect(vfxSummary(byName("Force Shield"))).toBe("3 meshes · 1 emitter · 1 light");
   });
 
   it("builds Roblox instances: attachments on an invisible root, parts for shaped emitters", () => {

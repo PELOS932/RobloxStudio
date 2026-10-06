@@ -15,6 +15,8 @@ const BY_NAME: Record<string, string> = {
   lightningArc: "Lightning Arc",
   snowfall: "Snowfall",
   healingPad: "Healing Pickup",
+  energyBurst: "Energy Burst",
+  forceShield: "Force Shield",
 };
 export const EFFECT_PRESET_NAMES = Object.keys(BY_NAME) as [string, ...string[]];
 

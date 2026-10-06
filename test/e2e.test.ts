@@ -213,7 +213,7 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(check).toMatchObject({ ok: true, output: "12 true 1" });
 
     const starters = (await api("/api/vfx/starters", { method: "POST" })).body;
-    expect(starters.ids).toHaveLength(8);
+    expect(starters.ids).toHaveLength(10);
     const rbxmx = await (await fetch(`${BASE}/api/assets/${starters.ids[2]}/export?format=rbxmx`)).text();
     expect(rbxmx).toContain('<Item class="ParticleEmitter"');
     expect(rbxmx).toContain('<Item class="ModuleScript"');

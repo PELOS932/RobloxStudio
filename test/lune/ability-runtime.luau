@@ -66,6 +66,8 @@ local fakeGame = {
 			end } }
 		elseif name == "Debris" then
 			return { AddItem = function(_, inst, t) schedule(t, function() inst.Parent = nil end) end }
+		elseif name == "HttpService" then
+			return { JSONDecode = function(_, text) return serde.decode("json", text) end }
 		elseif name == "KeyframeSequenceProvider" then
 			return { RegisterKeyframeSequence = function() registered += 1; return "rbxassetid://1" end }
 		end
@@ -149,6 +151,17 @@ while now < seconds do
 			if d:IsA("BasePart") and d.Name ~= "Root" and d.Name ~= "HumanoidRootPart" then lowest = math.min(lowest, d.Transparency) end
 		end
 		s.visible = r(1 - lowest)
+		-- Mesh effects: how big each got and how visible.
+		for _, d in m:GetDescendants() do
+			if d:IsA("BasePart") and d:GetAttribute("ForgeMesh") then
+				s.meshes = s.meshes or {}
+				local mesh = s.meshes[d.Name] or { maxSize = 0, minT = 1 }
+				mesh.maxSize = math.max(mesh.maxSize, r(math.max(d.Size.X, d.Size.Y, d.Size.Z)))
+				mesh.minT = math.min(mesh.minT, r(d.Transparency))
+				mesh.lastT = r(d.Transparency)
+				s.meshes[d.Name] = mesh
+			end
+		end
 		s.shown = math.max(s.shown, s.visible)
 		-- Where it is every quarter second.
 		local slot = tostring(math.floor((now + 1e-6) / 0.25))
