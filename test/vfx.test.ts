@@ -7,6 +7,7 @@ import {
   applyVfxEdit, colorKeys, isOneShot, numberKeys, oneShotLength, sampleColor, sampleNumber, sanitizeVfxSpec, textureUrl, VfxSpecSchema,
   vfxSummary, vfxTree, type VfxSpec,
 } from "../src/shared/vfx.ts";
+import { expandVfxInput } from "../src/shared/vfx-presets.ts";
 import { vfxToLuau } from "../src/shared/to-luau.ts";
 import { vfxToRbxmx } from "../src/shared/to-rbxmx.ts";
 import type { InstNode } from "../src/shared/instance-tree.ts";
@@ -69,6 +70,61 @@ describe("vfx specs", () => {
     expect(big.emitters[0]).toMatchObject({ pos: [0, 0.8, 0], shapeSize: [3.2, 0.4, 3.2] });
     expect((big.emitters[3] as { range: number }).range).toBe(32);
     expect(() => applyVfxEdit(base, { remove: base.emitters.map((e) => e.name) })).toThrow(/at least one/);
+  });
+
+  it("expands emitter presets with overrides (a burst makes a one-shot, a rate a stream)", () => {
+    const spec = sanitizeVfxSpec(VfxSpecSchema.parse({
+      name: "Torch",
+      emitters: [
+        { name: "Fire", type: "particles", preset: "flames", rate: 20, pos: [0, 2, 0] },
+        { name: "Pop", type: "particles", preset: "embers", burst: 10 },
+        { name: "Crackle", type: "particles", preset: "sparks", rate: 6 },
+      ],
+    }));
+    const [fire, pop, crackle] = spec.emitters as Extract<VfxSpec["emitters"][number], { type: "particles" }>[];
+    expect(fire).toMatchObject({ texture: "fire", rate: 20, pos: [0, 2, 0], lightEmission: 1 });
+    expect("preset" in fire).toBe(false);
+    expect(pop).toMatchObject({ texture: "spark", rate: 0, burst: 10 });
+    expect(crackle.rate).toBe(6);
+    expect(crackle.burst).toBeUndefined();
+    // Sanitizing again changes nothing.
+    expect(sanitizeVfxSpec(spec)).toEqual(spec);
+  });
+
+  it("builds whole effects from presets, scaled and tinted to a new hue", () => {
+    const blue = expandVfxInput({ preset: "explosion", tint: "#3fa0ff", scale: 0.5 });
+    expect(blue.name).toBe("Explosion");
+    expect(blue.emitters.map((e) => e.name)).toEqual(["Flash", "Shockwave", "Fireball", "Smoke", "Sparks"]);
+    expect(blue.emitters[0]).toMatchObject({ size: [[0, 2], [1, 6]] });
+    const hue = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+      const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+      const h = max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return ((h * 60) % 360 + 360) % 360;
+    };
+    const fireball = blue.emitters[2] as { color: [number, string][] };
+    for (const [, c] of fireball.color) expect(Math.abs(hue(c) - 210)).toBeLessThan(25);
+    // Smoke stays a dark grey (its faint warmth turns cool); one-shot timing comes along.
+    const smoke = (blue.emitters[3] as { color: string }).color;
+    const ch = [1, 3, 5].map((i) => parseInt(smoke.slice(i, i + 2), 16));
+    expect(Math.max(...ch) - Math.min(...ch)).toBeLessThan(12);
+    expect(ch[2]).toBeGreaterThan(ch[0]);
+    expect(isOneShot(blue)).toBe(true);
+    const grey = expandVfxInput({ preset: "campfire", name: "Ash Fire", tint: "#808080" });
+    expect(grey.name).toBe("Ash Fire");
+    const flames = grey.emitters[0] as { color: [number, string][] };
+    for (const [, c] of flames.color) expect(c.slice(1, 3)).toBe(c.slice(3, 5));
+  });
+
+  it("adds to a preset or replaces its emitters by name", () => {
+    const spec = expandVfxInput({
+      preset: "campfire", name: "Blue Fire",
+      emitters: [{ name: "Glow", type: "light", color: "#66ccff" }, { name: "Spark", type: "sparkles" }],
+    });
+    expect(spec.emitters.map((e) => e.name)).toEqual(["Flames", "Embers", "Smoke", "Glow", "Spark"]);
+    expect(spec.emitters[3]).toMatchObject({ color: "#66ccff", brightness: 2.5, range: 16 });
+    expect(() => expandVfxInput({ name: "Empty" })).toThrow(/emitters, or a preset/);
+    expect(applyVfxEdit(byName("Campfire"), { tint: "#3fa0ff" }).spec.emitters[3]).not.toMatchObject({ color: "#ff9a4a" });
   });
 
   it("builds Roblox instances: attachments on an invisible root, parts for shaped emitters", () => {

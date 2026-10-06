@@ -44,6 +44,12 @@ export const ColorSeqSchema = z.union([
 ]);
 const texture = z.string().max(200).describe(`${TEXTURE_PRESETS.join("|")} or rbxassetid://…`);
 
+/** Ready-made particle emitters (see PARTICLE_PRESETS); fields given next to a preset override it. */
+export const PARTICLE_PRESET_NAMES = [
+  "flames", "embers", "smoke", "sparks", "flash", "shockwave", "fireball", "puff", "dust", "glow", "motes", "aura", "rise", "snow", "vortex", "electric",
+] as const;
+export type ParticlePreset = (typeof PARTICLE_PRESET_NAMES)[number];
+
 const common = {
   name: z.string().min(1).max(60),
   pos: vec3.optional().describe("offset from the root, studs"),
@@ -53,6 +59,7 @@ const common = {
 export const ParticlesSchema = z.object({
   ...common,
   type: z.literal("particles"),
+  preset: z.enum(PARTICLE_PRESET_NAMES).optional().describe("start from a ready-made emitter; other fields override it"),
   texture: texture.optional(),
   color: ColorSeqSchema.optional(),
   size: NumberSeqSchema.optional().describe("studs"),
@@ -267,10 +274,46 @@ export const DIRECTIONS: Record<string, Vec3> = {
   up: [0, 1, 0], down: [0, -1, 0], left: [-1, 0, 0], right: [1, 0, 0], front: [0, 0, -1], back: [0, 0, 1],
 };
 
-/** Round numbers, unique names, keep only what an emitter type uses. */
+type PresetFields = Omit<VfxParticles, "name" | "type" | "preset" | "pos" | "enabled">;
+
+/** Tuned particle emitters (most come from the starter effects). One-shots use rate 0 + burst. */
+export const PARTICLE_PRESETS: Record<ParticlePreset, PresetFields> = {
+  flames: { texture: "fire", color: [[0, "#ffd36b"], [0.45, "#ff7a1a"], [1, "#a8200a"]], size: [[0, 1.4], [0.5, 1.8], [1, 0.4]], transparency: [[0, 0.3], [0.6, 0.45], [1, 1]], lifetime: [0.6, 1.1], rate: 45, speed: [2, 4], spread: 12, rotation: [-30, 30], spin: [-60, 60], lightEmission: 1 },
+  embers: { texture: "spark", color: ["#ffc04d", "#ff5a1f"], size: [0.18, 0.05], transparency: [0, 1], lifetime: [1.2, 2.2], rate: 14, speed: [4, 7], spread: 25, accel: [0, 1.5, 0], drag: 1, lightEmission: 1 },
+  smoke: { texture: "smoke", color: "#3d3936", size: [[0, 1], [1, 3.5]], transparency: [[0, 0.75], [0.3, 0.6], [1, 1]], lifetime: [2.5, 3.5], rate: 5, speed: [1.5, 2.5], spread: 15, rotation: [0, 360], spin: [-20, 20], accel: [0.4, 0.2, 0] },
+  sparks: { texture: "spark", color: ["#fff2b0", "#ff8a1f"], size: [0.35, 0.05], transparency: [0, 1], lifetime: [0.8, 1.4], rate: 0, burst: 40, speed: [18, 34], spread: 180, accel: [0, -40, 0], drag: 1.5, orientation: "velocity", squash: 1.5, lightEmission: 1 },
+  flash: { texture: "glow", color: "#fff1c1", size: [[0, 4], [1, 12]], transparency: [[0, 0], [1, 1]], lifetime: 0.25, rate: 0, burst: 1, speed: 0, lightEmission: 1, zOffset: 1 },
+  shockwave: { texture: "ring", color: "#ffd9a0", size: [[0, 2], [1, 22]], transparency: [[0, 0.2], [1, 1]], lifetime: 0.6, rate: 0, burst: 1, speed: 0, orientation: "velocityPerp", lightEmission: 0.6 },
+  fireball: { texture: "core", color: [[0, "#ffe08a"], [0.4, "#ff7b22"], [1, "#5a1d0a"]], size: [[0, 3], [1, 7]], transparency: [[0, 0], [0.7, 0.4], [1, 1]], lifetime: [0.6, 0.9], rate: 0, burst: 18, speed: [6, 14], spread: 180, drag: 4, rotation: [0, 360], spin: [-90, 90], lightEmission: 0.8 },
+  puff: { texture: "puff", color: "#3b3632", size: [[0, 3], [1, 8]], transparency: [[0, 0.4], [1, 1]], lifetime: [2, 3], rate: 0, burst: 14, speed: [3, 7], spread: 180, drag: 2, accel: [0, 2, 0], rotation: [0, 360], spin: [-30, 30] },
+  dust: { texture: "puff", color: "#b59a76", size: [[0, 1.2], [1, 3.5]], transparency: [[0, 0.45], [1, 1]], lifetime: [0.9, 1.5], rate: 0, burst: 16, speed: [6, 10], spread: 85, drag: 3, accel: [0, 1, 0], rotation: [0, 360], spin: [-40, 40] },
+  glow: { texture: "glow", color: "#ffffff", size: 3, transparency: [[0, 1], [0.3, 0.5], [1, 1]], lifetime: 0.5, rate: 10, speed: 0, locked: true, lightEmission: 1 },
+  motes: { texture: "sparkle", color: "#e3d1ff", size: [0.35, 0], transparency: [0, 1], lifetime: [1.5, 2.5], rate: 12, speed: [0.5, 1], spread: 180, spin: [-90, 90], lightEmission: 1 },
+  aura: { texture: "glow", color: ["#c69bff", "#6a2cff"], size: [[0, 0.9], [1, 0]], transparency: [[0, 0.2], [1, 1]], lifetime: [1.2, 2], rate: 80, speed: [2.5, 4], shape: "cylinder", shapeSize: [5, 0.2, 5], surface: true, lightEmission: 1 },
+  rise: { texture: "sparkle", color: ["#b6ffcf", "#29e06f"], size: [0.45, 0], transparency: [0, 1], lifetime: [1.2, 2], rate: 16, speed: [2, 4], spin: [-90, 90], shape: "disc", shapeSize: [3, 0.2, 3], lightEmission: 1 },
+  snow: { texture: "glow", color: "#ffffff", size: [[0, 0.4], [1, 0.3]], transparency: [[0, 1], [0.1, 0.1], [0.9, 0.2], [1, 1]], lifetime: [5, 7], rate: 120, speed: [2.5, 4], spread: 15, accel: [0.6, 0, 0.2], direction: "down", shape: "box", shapeSize: [40, 1, 40] },
+  vortex: { texture: "vortex", color: ["#7ffff0", "#1a8cff"], size: [[0, 6], [1, 3]], transparency: [[0, 1], [0.3, 0.2], [1, 1]], lifetime: 1.5, rate: 6, speed: 0, rotation: [0, 360], spin: [160, 220], orientation: "velocityPerp", direction: "front", lightEmission: 1 },
+  electric: { texture: "spark", color: "#d8f4ff", size: [0.3, 0], transparency: [0, 1], lifetime: 0.4, rate: 40, speed: [4, 9], spread: 180, lightEmission: 1 },
+};
+
+/** A preset emitter with the given fields on top (a burst makes it a one-shot, a rate continuous). */
+function expandParticlePreset(e: VfxParticles): VfxParticles {
+  if (!e.preset) return e;
+  const { preset, ...own } = e;
+  const out: VfxParticles = { ...structuredClone(PARTICLE_PRESETS[preset]), ...own };
+  if (own.burst !== undefined && own.rate === undefined) out.rate = 0;
+  if (own.rate && own.burst === undefined) {
+    delete out.burst;
+    delete out.delay;
+  }
+  return out;
+}
+
+/** Round numbers, unique names, keep only what an emitter type uses; particle presets expanded. */
 export function sanitizeVfxSpec(spec: VfxSpec): VfxSpec {
   const used = new Set<string>();
-  const emitters = spec.emitters.map((e) => {
+  const emitters = spec.emitters.map((raw) => {
+    const e = raw.type === "particles" ? expandParticlePreset(raw) : raw;
     let name = e.name.trim() || e.type;
     for (let i = 2; used.has(name); i++) name = `${e.name}${i}`;
     used.add(name);
@@ -321,6 +364,7 @@ export const VfxEditSchema = z.object({
   update: z.array(PartialEmitter).optional().describe("matched by name; only listed fields change (null removes a field)"),
   remove: z.array(z.string()).optional(),
   scale: z.number().min(0.05).max(20).optional().describe("scale sizes, speeds and offsets"),
+  tint: hex.optional().describe("shift every color to this hue (keeps light and dark parts)"),
   motion: VfxSpecSchema.shape.motion,
 });
 export type VfxEdit = z.infer<typeof VfxEditSchema>;
@@ -356,7 +400,79 @@ export function applyVfxEdit(spec: VfxSpec, edit: VfxEdit): { spec: VfxSpec; mis
   if (!emitters.length) throw new Error("An effect needs at least one emitter.");
   const next: VfxSpec = { ...spec, emitters, name: edit.name ?? spec.name };
   if (edit.motion) next.motion = edit.motion;
-  return { spec: sanitizeVfxSpec(VfxSpecSchema.parse(next)), missing };
+  const out = sanitizeVfxSpec(VfxSpecSchema.parse(next));
+  return { spec: edit.tint ? tintVfx(out, edit.tint) : out, missing };
+}
+
+// ---------------------------------------------------------------------------
+// Tint: rotate every color's hue so the effect's main hue becomes the tint's (a fire turns into
+// a blue fire with the same bright core and dark edges). A grey tint makes the effect grey.
+
+type HSL = [number, number, number];
+
+function toHsl(h: string): HSL {
+  const [r, g, b] = hexToRgb(h).map((v) => v / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const hue = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [hue * 60, s, l];
+}
+
+function fromHsl([h, s, l]: HSL): string {
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return "#" + [f(0), f(8), f(4)].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+}
+
+function mapColorSeq(seq: ColorSeq | undefined, fn: (h: string) => string): ColorSeq | undefined {
+  if (seq === undefined) return seq;
+  if (typeof seq === "string") return fn(seq);
+  if (typeof seq[0] === "string") return (seq as string[]).map(fn) as ColorSeq;
+  return (seq as [number, string][]).map(([t, c]) => [t, fn(c)]) as ColorSeq;
+}
+
+function emitterColors(e: VfxEmitter, fn: (h: string) => string): VfxEmitter {
+  const out = { ...e } as Record<string, unknown>;
+  if (e.type === "particles" || e.type === "beam" || e.type === "trail") out.color = mapColorSeq(e.color, fn);
+  else if (e.type === "fire") {
+    out.color = fn(e.color ?? FIRE_DEFAULTS.color);
+    out.secondaryColor = fn(e.secondaryColor ?? FIRE_DEFAULTS.secondaryColor);
+  } else if (e.type === "light" || e.type === "smoke" || e.type === "sparkles") {
+    if (e.color) out.color = fn(e.color);
+    else if (e.type === "sparkles") out.color = fn(SPARKLES_DEFAULT);
+  }
+  if (out.color === undefined) delete out.color;
+  return out as VfxEmitter;
+}
+
+export function tintVfx<T extends { emitters: VfxEmitter[] }>(spec: T, tint: string): T {
+  const [th, ts] = toHsl(tint);
+  // The effect's main hue: the circular mean of its colors' hues, weighted by how colorful each is.
+  let x = 0, y = 0;
+  for (const e of spec.emitters) {
+    emitterColors(e, (h) => {
+      const [hue, s, l] = toHsl(h);
+      const w = s * (1 - Math.abs(2 * l - 1));
+      x += Math.cos((hue * Math.PI) / 180) * w;
+      y += Math.sin((hue * Math.PI) / 180) * w;
+      return h;
+    });
+  }
+  const colorful = Math.hypot(x, y) > 1e-3;
+  const delta = th - (colorful ? (Math.atan2(y, x) * 180) / Math.PI : 0);
+  const fn = (h: string) => {
+    const [hue, s, l] = toHsl(h);
+    if (ts < 0.08) return fromHsl([hue, 0, l]);
+    // Colors turn by the same angle; greys stay grey unless the whole effect is grey or white.
+    if (s < 0.06) return colorful ? h : fromHsl([th, ts * 0.6, l]);
+    if (!colorful) return fromHsl([th, Math.max(s, ts * 0.6), l]);
+    return fromHsl([(((hue + delta) % 360) + 360) % 360, s, l]);
+  };
+  return { ...spec, emitters: spec.emitters.map((e) => emitterColors(e, fn)) };
 }
 
 function scaleSeq(s: NumberSeq | undefined, k: number): NumberSeq | undefined {

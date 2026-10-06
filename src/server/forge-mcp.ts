@@ -21,9 +21,10 @@ import { ScriptSpecSchema } from "../shared/script.ts";
 import { checkModel, describeIssues } from "../shared/diagnostics.ts";
 import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from "../shared/compact.ts";
 import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
-import { applyVfxEdit, sanitizeVfxSpec, VfxEditSchema, VfxSpecSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
+import { applyVfxEdit, PARTICLE_PRESET_NAMES, VfxEditSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
 import { scriptsToLuau } from "../shared/to-luau.ts";
-import { AbilityEditSchema, AbilitySpecSchema, applyAbilityEdit, ATTACH_POINTS, sanitizeAbilitySpec } from "../shared/ability.ts";
+import { AbilityEditSchema, AbilitySpecInputSchema, applyAbilityEdit, ATTACH_POINTS, expandAbilityInput, sanitizeAbilitySpec } from "../shared/ability.ts";
+import { EFFECT_PRESET_NAMES, expandVfxInput, VfxInputSchema } from "../shared/vfx-presets.ts";
 import { resolveStored } from "./importer.ts";
 import {
   auditLuau, editLuau, LIGHTING_PRESETS, lightingLuau, parseScriptRead, queryLuau, scriptPatchLuau, scriptReadLuau, scriptSearchLuau, terrainLuau, undoLuau,
@@ -300,7 +301,7 @@ export class ForgeMcp {
       },
       {
         name: "edit_model",
-        description: "Change an existing model: add parts, update parts by name (partial fields), remove by name, move or scale everything.",
+        description: "Change an existing model: add parts, update parts by name (partial fields), bulk-change parts by filter (updateWhere), swap colors (recolor), remove by name, move or scale everything.",
         schema: ModelEditSchema.extend({
           id,
           add: z.array(PartInputSchema).optional(),
@@ -310,6 +311,7 @@ export class ForgeMcp {
           add: "new parts: same fields as create_model parts (style/repeat/copies allowed)",
           update: "partial updates matched by name: {name, ...any create_model part fields}; only listed fields change",
           styles: "styles for the added parts, as in create_model",
+          updateWhere: "[{where: {name?, group?, material?, color?, shape?}, set?: {part fields}, move?: [x,y,z]}]: every part matching all filters (name: exact, base of numbered copies, or * wildcard; group includes subgroups)",
         }),
         run: async ({ id: assetId, styles, add, ...edit }, ctx) => {
           const prev = assets.get(assetId);
@@ -332,12 +334,13 @@ export class ForgeMcp {
       },
       {
         name: "edit_ui",
-        description: "Change an existing UI: add nodes, update nodes by name (partial fields), remove nodes (with descendants).",
+        description: "Change an existing UI: add nodes, update nodes by name (partial fields), bulk-change nodes by filter (updateWhere), swap colors (recolor), remove nodes (with descendants).",
         schema: UiEditSchema.extend({ id, add: z.array(UiNodeInputSchema).optional(), styles: UiStylesSchema }),
         advertise: (s) => looseItems(s, {
           add: "new nodes (appended; set parent): same fields as create_ui nodes (style allowed)",
           update: "partial updates matched by name: {name, ...any create_ui node fields}; only listed fields change",
           styles: "styles for the added nodes, as in create_ui",
+          updateWhere: "[{where: {name?, type?, under? (node name), bg?, textColor?}, set: {node fields}}]: every node matching all filters (name: exact, base of numbered copies, or * wildcard)",
         }),
         run: async ({ id: assetId, styles, add, ...edit }, ctx) => {
           const prev = assets.get(assetId);
@@ -449,20 +452,20 @@ export class ForgeMcp {
       {
         name: "create_vfx",
         description:
-          "Create (or replace, with id) a visual effect: particle emitters, beams, trails, fire, smoke, sparkles and lights around one root. Previews live in the browser; importing builds a Model (inside a BasePart parent it is welded on). One-shots: rate 0 + burst; play with require(effect.Play)().",
-        schema: VfxSpecSchema.extend({ id: id.optional().describe("replace this existing effect") }),
+          "Create (or replace, with id) a visual effect: particle emitters, beams, trails, fire, smoke, sparkles and lights around one root. Previews live in the browser; importing builds a Model (inside a BasePart parent it is welded on). One-shots: rate 0 + burst; play with require(effect.Play)(). Save tokens with presets: a whole effect ({preset, tint, scale}) or per emitter ({type: particles, preset, ...overrides}).",
+        schema: VfxInputSchema.extend({ id: id.optional().describe("replace this existing effect") }),
         advertise: (s) => looseItems(s, {
-          emitters: `[{name, type: particles|beam|trail|light|fire|smoke|sparkles, pos?: [x,y,z] studs from the root (y up)}]. particles: texture (${TEXTURE_PRESETS.join("|")} or rbxassetid://), color ("#hex" | ["#a","#b"] | [[t,"#hex"],…]), size/transparency/squash (n | [from,to] | [[t,v,env?],…]), lifetime/speed/rotation/spin ([min,max] or n), rate, burst, delay, spread (deg), direction (up|down|left|right|front|back), accel [x,y,z], drag, lightEmission 0..1, brightness, orientation (camera|cameraUp|velocity|velocityPerp), shape (box|sphere|cylinder|disc) + shapeSize + surface/inward, flipbook {grid,mode,fps}, locked, zOffset. beam: from, to, width ([w0,w1]), curve [c0,c1], color, transparency, texture, textureLength, textureSpeed, textureMode, segments, faceCamera. trail: from, to (attachment offsets), lifetime, color, transparency, widthScale. light: kind point|spot, color, brightness, range, angle, face. fire: color, secondaryColor, heat, size. smoke: color, opacity, riseVelocity, size. sparkles: color.`,
+          emitters: `[{name, type: particles|beam|trail|light|fire|smoke|sparkles, pos?: [x,y,z] studs from the root (y up)}]. particles: preset (${PARTICLE_PRESET_NAMES.join("|")}) then only fields to change, or texture (${TEXTURE_PRESETS.join("|")} or rbxassetid://), color ("#hex" | ["#a","#b"] | [[t,"#hex"],…]), size/transparency/squash (n | [from,to] | [[t,v,env?],…]), lifetime/speed/rotation/spin ([min,max] or n), rate, burst, delay, spread (deg), direction (up|down|left|right|front|back), accel [x,y,z], drag, lightEmission 0..1, brightness, orientation (camera|cameraUp|velocity|velocityPerp), shape (box|sphere|cylinder|disc) + shapeSize + surface/inward, flipbook {grid,mode,fps}, locked, zOffset. beam: from, to, width ([w0,w1]), curve [c0,c1], color, transparency, texture, textureLength, textureSpeed, textureMode, segments, faceCamera. trail: from, to (attachment offsets), lifetime, color, transparency, widthScale. light: kind point|spot, color, brightness, range, angle, face. fire: color, secondaryColor, heat, size. smoke: color, opacity, riseVelocity, size. sparkles: color.`,
         }),
         run: async ({ id: replaceId, ...raw }, ctx) => {
-          const spec = sanitizeVfxSpec(raw);
+          const spec = expandVfxInput(raw);
           const asset = this.save("vfx", spec, replaceId);
           return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx);
         },
       },
       {
         name: "edit_vfx",
-        description: "Change an effect: update emitters by name (only listed fields; null removes one; rename with rename), add or remove emitters, scale everything, or change the preview motion.",
+        description: "Change an effect: update emitters by name (only listed fields; null removes one; rename with rename), add or remove emitters, scale everything, tint (recolor everything to a hue), or change the preview motion.",
         schema: VfxEditSchema.extend({ id }),
         advertise: (s) => looseItems(s, {
           add: "new emitters, same format as create_vfx",
@@ -480,19 +483,19 @@ export class ForgeMcp {
         name: "create_ability",
         description:
           "Create (or replace, with id) an ability: an animation plus effects timed to it (fireballs, slams, auras, slashes), previewed on an R15/R6 dummy. Import adds ReplicatedStorage.Abilities.<name> (require(...Play)(character) casts it) and a StarterPack Tool to try it.",
-        schema: AbilitySpecSchema.extend({ id: id.optional().describe("replace this existing ability") }),
+        schema: AbilitySpecInputSchema.extend({ id: id.optional().describe("replace this existing ability") }),
         advertise: (s) => looseItems(loose(s, { animation: "animation id (a_…) or inline {keyframes, loop?, priority?} as in create_animation" }), {
-          events: `[{at: seconds, vfx: effect id (v_…) or inline {emitters} in create_vfx format, attach?: ${ATTACH_POINTS.join("|")} (default root), offset?: [x,y,z] in the character's frame (x right, y up, z back; forward is -z), follow?: character|part, duration?: s (default 1), travel?: {velocity: [x,y,z] studs/s in the character's frame, gravity?, stopOnHit?}, impact?: effect id or inline effect played where it lands, scale?, name?}]`,
+          events: `[{at: seconds, vfx: effect id (v_…) or inline create_vfx input (e.g. {preset: ${EFFECT_PRESET_NAMES.slice(0, 3).join("|")}…, tint?, scale?} or {emitters}), attach?: ${ATTACH_POINTS.join("|")} (default root), offset?: [x,y,z] in the character's frame (x right, y up, z back; forward is -z), follow?: character|part, duration?: s (default 1), travel?: {velocity: [x,y,z] studs/s in the character's frame, gravity?, stopOnHit?}, impact?: effect id or inline effect played where it lands, scale?, name?}]`,
         }),
         run: async ({ id: replaceId, ...raw }, ctx) => {
-          const spec = sanitizeAbilitySpec(raw);
+          const spec = sanitizeAbilitySpec(expandAbilityInput(raw));
           const asset = this.save("ability", spec, replaceId);
           return this.afterSave(asset, replaceId ? "Replaced" : "Created", ctx);
         },
       },
       {
         name: "edit_ability",
-        description: "Change an ability: update events by index (only listed fields; null removes one), add or remove events, or change rig, animation, length or cooldown.",
+        description: "Change an ability: update events by index (only listed fields; null removes one), add or remove events, tint every inline effect, or change rig, animation, length or cooldown.",
         schema: AbilityEditSchema.extend({ id }),
         advertise: (s) => looseItems(loose(s, { animation: "animation id or inline keyframes, as in create_ability" }), {
           add: "new events, same format as create_ability events",

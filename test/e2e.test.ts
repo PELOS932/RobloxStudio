@@ -248,6 +248,56 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect((await fetch(`${BASE}/api/rbxasset/..%2Fsecret`)).status).toBe(404);
   });
 
+  it("works in short calls: preset effects, bulk model edits, script read/patch, audit, @selection", async () => {
+    await waitFor("studio", (e) => e.status.state === "connected" && !!e.status.studioId);
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text: "Use the presets" }));
+    await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && events.some((x) => x.type === "message" && x.convId === conv.id && x.message.blocks.some((b) => b.type === "text" && b.text === "Done.")), 60_000);
+    const last = (await api(`/api/conversations/${conv.id}`)).body.messages.at(-1);
+    const results = last.blocks.filter((b: { type: string }) => b.type === "tool").map((b: { result?: { text: string } }) => b.result?.text ?? "");
+    expect(results[0]).toMatch(/^Created vfx "Blue Blast" \(id v_\w{6}, v1, 5 emitters: 5 emitters\)[\s\S]*Imported in Studio at Workspace\.Blue Blast/);
+    expect(results[2]).toMatch(/^Edited model "Post"/);
+    expect(results[4]).toBe("== ServerScriptService.Gate [Script] lines 2-3 of 3\n2\twait(1)\n3\tprint(open)");
+    expect(results[5]).toBe("ok\n1 ServerScriptService.Gate: 1 edit at line 2 (3 → 3 lines)");
+    expect(results[6]).toMatch(/^Audit of ServerScriptService\.Gate: .*\nNo problems found\.$/);
+    expect(results[8].split("\n")).toEqual([
+      "3 matches",
+      "Workspace.Post.Base [Part] Color=#111111",
+      "Workspace.Post.Pole [Part] Color=#ff0000",
+      "Workspace.Post.Bulb [Part] Color=#ffcc66",
+    ]);
+    const blast = (await api("/api/state")).body.assets.find((a: { name: string }) => a.name === "Blue Blast");
+    const spec = (await api(`/api/assets/${blast.id}`)).body.spec;
+    expect(spec.emitters[0]).toMatchObject({ name: "Flash", size: [[0, 2], [1, 6]] });
+  });
+
+  it("starts Claude Code while the user types, and sends the Studio selection along (once)", async () => {
+    await waitFor("studio", (e) => e.status.state === "connected" && !!e.status.studioId);
+    await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: 'game:GetService("Selection"):Set({ workspace.Lantern }) return "ok"' }) });
+    const conv = (await api("/api/conversations", { method: "POST", body: "{}" })).body;
+    ws.send(JSON.stringify({ type: "chat.warm", convId: conv.id }));
+    await new Promise((r) => setTimeout(r, 300));
+    const from = events.length;
+    const reply = async (text: string) => {
+      const mark = events.length;
+      ws.send(JSON.stringify({ type: "chat.send", convId: conv.id, text }));
+      const running = () => events.findIndex((x, i) => i >= mark && x.type === "status" && x.convId === conv.id && x.status === "running");
+      await waitFor("status", (e) => e.convId === conv.id && e.status === "idle" && running() >= 0 && events.indexOf(e) > running());
+      const last = (await api(`/api/conversations/${conv.id}`)).body.messages.at(-1);
+      return last.blocks.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
+    };
+    const first = await reply("What is the studio context?");
+    expect(first).toMatch(/^Context: <studio>place "[^"]*" · selected Workspace\.Lantern \[Model\] 3 parts<\/studio>$/);
+    // Already running: no "starting" step for the first message.
+    const statuses = events.slice(from).filter((e) => e.type === "status" && e.convId === conv.id).map((e) => (e as { status: string }).status);
+    expect(statuses).not.toContain("starting");
+    // Unchanged since the last message: not sent again.
+    expect(await reply("Studio context again?")).toBe("Context: none");
+    // The user's own message is stored without it.
+    const msgs = (await api(`/api/conversations/${conv.id}`)).body.messages;
+    expect(msgs[0].blocks).toEqual([{ type: "text", text: "What is the studio context?" }]);
+  });
+
   it("browses the open place: Explorer, map, scripts and selection", async () => {
     const post = (path: string, body: unknown) => api(path, { method: "POST", body: JSON.stringify(body) });
     const top = (await post("/api/place/children", { path: [] })).body;

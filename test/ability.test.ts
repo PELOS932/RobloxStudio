@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  abilityLength, abilityRefs, AbilitySpecSchema, applyAbilityEdit, resolveAbility, sanitizeAbilitySpec, type AbilitySpec,
+  abilityLength, abilityRefs, AbilitySpecSchema, applyAbilityEdit, expandAbilityInput, resolveAbility, sanitizeAbilitySpec, type AbilitySpec,
 } from "../src/shared/ability.ts";
 import { abilityTrees, animationHash, playSource, standaloneTool } from "../src/shared/ability-studio.ts";
 import { abilityToLuau } from "../src/shared/to-luau.ts";
@@ -74,6 +74,26 @@ describe("ability specs", () => {
     expect("offset" in spec.events[2]).toBe(false);
     expect(spec.cooldown).toBe(3);
     expect(() => applyAbilityEdit(base, { remove: [0, 1] })).toThrow(/at least one/);
+  });
+
+  it("accepts preset effects inline, tinted and scaled, and tints a whole ability", () => {
+    const spec = sanitizeAbilitySpec(expandAbilityInput({
+      name: "Blue Blast", rig: "R15",
+      events: [
+        { at: 0.6, vfx: { preset: "explosion", tint: "#3fa0ff", scale: 0.5 }, attach: "ground" },
+        { name: "Bolt", at: 0.2, vfx: { emitters: [{ name: "Core", type: "particles", preset: "glow", size: 1.5 }] }, travel: { velocity: [0, 0, -40] }, impact: { preset: "explosion", scale: 0.4 } },
+      ],
+    }));
+    const [bolt, blast] = spec.events;
+    expect(typeof bolt.vfx !== "string" && bolt.vfx.name).toBe("Bolt");
+    expect(typeof bolt.vfx !== "string" && bolt.vfx.emitters[0]).toMatchObject({ texture: "glow", size: 1.5, locked: true });
+    expect(typeof bolt.impact !== "string" && bolt.impact?.name).toBe("Bolt Impact");
+    expect(typeof blast.vfx !== "string" && blast.vfx.name).toBe("Explosion");
+    expect(resolveAbility(spec, none).missing).toEqual([]);
+    const red = applyAbilityEdit(spec, { tint: "#ff3030", update: [{ index: 1, vfx: { preset: "campfire" } }] }).spec;
+    const campfire = red.events[1].vfx;
+    expect(typeof campfire !== "string" && campfire.emitters.map((e) => e.name)).toEqual(["Flames", "Embers", "Smoke", "Glow"]);
+    expect(typeof red.events[0].impact !== "string" && red.events[0].impact?.emitters[0]).not.toMatchObject({ color: "#fff1c1" });
   });
 
   it("builds a Studio folder, a Tool and a data-driven Play module", () => {

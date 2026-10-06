@@ -217,6 +217,23 @@ for await (const line of createInterface({ input: process.stdin })) {
     await toolCall("studio_lighting", { preset: "night" });
     await toolCall("studio_playtest", { seconds: 1 });
     streamText("Done.");
+  } else if (/preset/i.test(prompt)) {
+    // Short calls: a preset effect, bulk model edits, scripts read and patched, an audit.
+    await toolCall("create_vfx", { preset: "explosion", name: "Blue Blast", tint: "#3fa0ff", scale: 0.5 });
+    const model = await toolCall("create_model", { ...lantern, name: "Post" });
+    const postId = model.content[0].text.match(/\b(m_[a-z0-9]{6})\b/)?.[1];
+    await toolCall("edit_model", { id: postId, updateWhere: [{ where: { material: "Metal" }, set: { color: "#ff0000" } }], recolor: { "#2b2b30": "#111111" } });
+    await toolCall("create_script", { name: "Gate", kind: "Script", parent: "ServerScriptService", source: "local open = false\nwait(1)\nprint(open)" });
+    await toolCall("studio_scripts", { read: ["ServerScriptService.Gate:2-3"] });
+    await toolCall("studio_script_patch", { scripts: [{ path: "ServerScriptService.Gate", edits: [{ old: "wait(1)", new: "task.wait(1)" }] }] });
+    await toolCall("studio_audit", { path: "ServerScriptService.Gate" });
+    await toolCall("studio_edit", { ops: [{ op: "select", path: "Workspace.Post" }] });
+    await toolCall("studio_query", { path: "@selection", class: "BasePart", props: ["Color"] });
+    streamText("Done.");
+  } else if (/studio context/i.test(prompt)) {
+    // Echo what Studio Forge added after the user's text (the live Studio context).
+    const extra = msg.message.content.filter((c) => c.type === "text").slice(1).map((c) => c.text).join("|");
+    streamText(`Context: ${extra || "none"}`);
   } else if (/lantern/i.test(prompt)) {
     streamText("Building a lantern.");
     await toolCall("create_model", lantern);

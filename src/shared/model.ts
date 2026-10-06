@@ -289,6 +289,36 @@ export function toNativeModel(spec: ModelSpec, opts: ConvertOptions = {}): Nativ
 // ---------------------------------------------------------------------------
 // Editing (edit_model tool) — lets Claude change a few parts without re-sending the whole model.
 
+/** Names in bulk edits: exact, the base of numbered copies ("Plank" → Plank1, Plank2…), or * wildcards. */
+export function nameMatches(name: string | undefined, pattern: string): boolean {
+  if (!name) return false;
+  if (pattern.includes("*")) {
+    const re = pattern.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+    return new RegExp(`^${re}$`, "i").test(name);
+  }
+  return name === pattern || name.replace(/\d+$/, "") === pattern;
+}
+
+const DEFAULT_PART_COLOR = "#a3a2a5";
+
+export const PartWhereSchema = z.object({
+  name: z.string().optional(),
+  group: z.string().optional().describe("this group and its subgroups"),
+  material: z.enum(MATERIALS).optional(),
+  color: hexColor.optional(),
+  shape: PartSchema.shape.shape,
+});
+export type PartWhere = z.infer<typeof PartWhereSchema>;
+
+export function partMatches(p: PartSpec, w: PartWhere): boolean {
+  if (w.name !== undefined && !nameMatches(p.name, w.name)) return false;
+  if (w.group !== undefined && p.group !== w.group && !p.group?.startsWith(w.group + "/")) return false;
+  if (w.material !== undefined && (p.material ?? "Plastic") !== w.material) return false;
+  if (w.color !== undefined && normalizeHex(p.color ?? DEFAULT_PART_COLOR) !== normalizeHex(w.color)) return false;
+  if (w.shape !== undefined && (p.shape ?? "block") !== w.shape) return false;
+  return true;
+}
+
 export const ModelEditSchema = z.object({
   add: z.array(PartSchema).optional().describe("new parts"),
   update: z
@@ -299,6 +329,12 @@ export const ModelEditSchema = z.object({
   rename: z.string().optional().describe("new model name"),
   move: vec3("offset every part by [x,y,z]").optional(),
   scale: z.number().positive().max(100).optional().describe("uniformly scale the whole model"),
+  updateWhere: z
+    .array(z.object({ where: PartWhereSchema, set: PartSchema.omit({ name: true, pos: true }).partial().optional(), move: vec3("offset [x,y,z]").optional() }))
+    .max(50)
+    .optional()
+    .describe("bulk changes: every part matching all where filters gets set and/or moved"),
+  recolor: z.record(z.string(), hexColor).optional().describe('swap colors on every part: {"#old": "#new"}'),
 });
 export type ModelEdit = z.infer<typeof ModelEditSchema>;
 
@@ -319,6 +355,33 @@ export function applyModelEdit(spec: ModelSpec, edit: ModelEdit): { spec: ModelS
     const merged: Record<string, unknown> = { ...parts[i] };
     for (const [k, v] of Object.entries(u)) if (v !== undefined) merged[k] = v;
     parts[i] = merged as PartSpec;
+  }
+  for (const u of edit.updateWhere ?? []) {
+    let hits = 0;
+    parts = parts.map((p) => {
+      if (!partMatches(p, u.where)) return p;
+      hits++;
+      const next: PartSpec = { ...p, ...u.set };
+      if (u.move) next.pos = [p.pos[0] + u.move[0], p.pos[1] + u.move[1], p.pos[2] + u.move[2]];
+      return next;
+    });
+    if (!hits) missing.push(`where ${JSON.stringify(u.where)}`);
+  }
+  if (edit.recolor) {
+    const map = new Map(Object.entries(edit.recolor).map(([a, b]) => [normalizeHex(a), normalizeHex(b)]));
+    const swap = (c: string | undefined, fallback?: string) => {
+      const to = map.get(normalizeHex(c ?? fallback ?? ""));
+      return to ?? c;
+    };
+    let hits = 0;
+    parts = parts.map((p) => {
+      const color = swap(p.color, DEFAULT_PART_COLOR);
+      const lightColor = p.light?.color ? swap(p.light.color) : undefined;
+      if (color === p.color && lightColor === p.light?.color) return p;
+      hits++;
+      return { ...p, ...(color !== p.color ? { color } : {}), ...(p.light && lightColor !== p.light.color ? { light: { ...p.light, color: lightColor } } : {}) };
+    });
+    if (!hits) missing.push(`recolor: no part has ${[...map.keys()].join(", ")}`);
   }
   if (edit.add?.length) parts = parts.concat(edit.add);
   if (edit.move) {

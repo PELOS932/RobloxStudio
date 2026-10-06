@@ -246,6 +246,8 @@ class ClaudeSession {
   }
 
   private lastContext = "";
+  /** Session id reported by a pre-warmed process before its first message. */
+  private warmSessionId: string | undefined;
 
   private async withStudioContext(content: unknown[]): Promise<unknown[]> {
     const get = this.deps.studioContext;
@@ -301,6 +303,8 @@ class ClaudeSession {
     if (!this.ensureProc()) return;
     this.setStatus("running");
     this.proc!.stdin!.write(line);
+    if (this.warmSessionId && this.conv) this.conv.claudeSessionId = this.warmSessionId;
+    this.warmSessionId = undefined;
     this.touch();
   }
 
@@ -323,6 +327,7 @@ class ClaudeSession {
   private spawn(settings: Settings, fp: string) {
     const conv = this.conv!;
     if (!conv.claudeSessionId) this.lastContext = "";
+    this.warmSessionId = undefined;
     mkdirSync(settings.workspaceDir, { recursive: true });
     mkdirSync(RUN_DIR, { recursive: true });
     writeFileSync(PROMPT_FILE, FORGE_SYSTEM_PROMPT);
@@ -471,7 +476,9 @@ class ClaudeSession {
       return;
     }
     if (obj.type === "system" && obj.subtype === "init") {
-      if (obj.session_id) conv.claudeSessionId = obj.session_id;
+      // A pre-warmed process has no conversation yet: keep its id until a message is sent.
+      if (obj.session_id && this.turn) conv.claudeSessionId = obj.session_id;
+      else if (obj.session_id) this.warmSessionId = obj.session_id;
       const forge = (obj.mcp_servers ?? []).find((s: any) => s.name === "forge");
       if (forge && forge.status !== "connected") {
         bus.emitEvent({ type: "toast", level: "error", message: `Claude Code could not reach Studio Forge's tools (${forge.status}).` });

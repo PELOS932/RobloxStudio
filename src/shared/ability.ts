@@ -9,7 +9,8 @@
 
 import { z } from "zod";
 import { animationLength, AnimationSpecSchema, RIG_TYPES, sanitizeAnimationSpec, type AnimationSpec, type RigType } from "./animation.ts";
-import { sanitizeVfxSpec, scaleVfx, VfxSpecSchema, vfxTail, type VfxSpec } from "./vfx.ts";
+import { sanitizeVfxSpec, scaleVfx, tintVfx, VfxSpecSchema, vfxTail, type VfxSpec } from "./vfx.ts";
+import { expandVfxInput, VfxInputSchema } from "./vfx-presets.ts";
 import type { Vec3 } from "./math.ts";
 
 export const ATTACH_POINTS = ["root", "rightHand", "leftHand", "head", "torso", "rightFoot", "leftFoot", "ground", "world"] as const;
@@ -79,6 +80,34 @@ export const AbilitySpecSchema = z.object({
 export type AbilityEvent = z.infer<typeof AbilityEventSchema>;
 export type AbilitySpec = z.infer<typeof AbilitySpecSchema>;
 type VfxRefValue = z.infer<typeof VfxRef>;
+
+// What Claude may send: inline effects in create_vfx input format (presets, tint, scale).
+const VfxRefInput = z.union([z.string().regex(ASSET_ID), VfxInputSchema]);
+export const AbilityEventInputSchema = AbilityEventSchema.extend({
+  vfx: VfxRefInput.describe("effect asset id (v_…) or an inline effect in create_vfx format"),
+  impact: VfxRefInput.optional().describe("effect played where a traveling effect ends or hits"),
+});
+export const AbilitySpecInputSchema = AbilitySpecSchema.extend({ events: z.array(AbilityEventInputSchema).min(1).max(40) });
+export type AbilityEventInput = z.infer<typeof AbilityEventInputSchema>;
+export type AbilitySpecInput = z.infer<typeof AbilitySpecInputSchema>;
+
+/** Inline effects are named after the event, else the preset, else the ability. */
+function expandRef(ref: z.infer<typeof VfxRefInput>, eventName: string | undefined, abilityName: string): VfxRefValue {
+  if (typeof ref === "string") return ref;
+  return expandVfxInput(ref, eventName ?? (ref.preset ? undefined : abilityName));
+}
+
+/** An event with its inline effects expanded (presets, tint and scale applied). */
+export function expandAbilityEvent(e: AbilityEventInput | Record<string, unknown>, abilityName: string): AbilityEvent {
+  const ev = AbilityEventInputSchema.parse(e);
+  const out: Record<string, unknown> = { ...ev, vfx: expandRef(ev.vfx, ev.name, abilityName) };
+  if (ev.impact !== undefined) out.impact = expandRef(ev.impact, ev.name && `${ev.name} Impact`, `${abilityName} Impact`);
+  return AbilityEventSchema.parse(out);
+}
+
+export function expandAbilityInput(input: AbilitySpecInput): AbilitySpec {
+  return AbilitySpecSchema.parse({ ...input, events: input.events.map((e) => expandAbilityEvent(e, input.name)) });
+}
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -200,9 +229,10 @@ export const AbilityEditSchema = z.object({
   animation: AbilitySpecSchema.shape.animation,
   length: z.number().min(0.1).max(30).nullable().optional(),
   cooldown: z.number().min(0).max(120).optional(),
-  add: z.array(AbilityEventSchema).optional(),
+  add: z.array(AbilityEventInputSchema).optional(),
   update: z.array(PartialEvent).optional().describe("[{index, ...fields}] by position in events (sorted by at); null removes a field"),
   remove: z.array(z.number().int().min(0)).optional().describe("event indexes"),
+  tint: z.string().regex(/^#?[0-9a-fA-F]{6}$/).optional().describe("shift the colors of every inline effect to this hue"),
 });
 export type AbilityEdit = z.infer<typeof AbilityEditSchema>;
 
@@ -220,15 +250,23 @@ export function applyAbilityEdit(spec: AbilitySpec, edit: AbilityEdit): { spec: 
       if (v === null) delete merged[k];
       else merged[k] = v;
     }
-    events[u.index] = AbilityEventSchema.parse(merged);
+    events[u.index] = expandAbilityEvent(merged, spec.name);
   }
   if (edit.remove?.length) {
     const gone = new Set(edit.remove);
     for (const i of gone) if (!events[i]) missing.push(i);
     events = events.filter((_, i) => !gone.has(i));
   }
-  events.push(...(edit.add ?? []));
+  events.push(...(edit.add ?? []).map((e) => expandAbilityEvent(e, edit.name ?? spec.name)));
   if (!events.length) throw new Error("An ability needs at least one event.");
+  if (edit.tint) {
+    const tint = edit.tint;
+    events = events.map((e) => ({
+      ...e,
+      vfx: typeof e.vfx === "string" ? e.vfx : tintVfx(e.vfx, tint),
+      ...(e.impact && typeof e.impact !== "string" ? { impact: tintVfx(e.impact, tint) } : {}),
+    }));
+  }
   const next: AbilitySpec = { ...spec, events };
   for (const k of ["name", "description", "rig", "animation", "cooldown"] as const) {
     if (edit[k] !== undefined) (next as Record<string, unknown>)[k] = edit[k];

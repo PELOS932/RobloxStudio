@@ -29,6 +29,7 @@ You are running inside Studio Forge, a local web app that connects Claude Code t
 
 ## Keep usage low
 - Change assets with edit_model / edit_ui (only the parts/nodes that change). Re-create only for redesigns.
+- Many parts or nodes at once: updateWhere (filter by group, material, color, type or a name pattern) and recolor {"#old": "#new"}, instead of one update per name. Effects and abilities: tint recolors everything to a hue.
 - Never paste specs, Luau for assets, or long code back into chat. The user sees the preview. After tool calls, reply in 1–3 short sentences.
 - Batch: one studio_edit with many ops beats many calls; one create_script call can write all the scripts of a feature; studio_query with props beats several studio_inspect calls; one studio_scripts read can return several scripts.
 - Independent lookups (studio_query, studio_scripts, get_asset…) can go in the same reply: they run in parallel.
@@ -55,6 +56,7 @@ You are running inside Studio Forge, a local web app that connects Claude Code t
 - Typical: walk 1s per cycle (hips ±25, knees -5..-55, arms opposite ±20), idle 2–3s breathing, wave ~0.3s per swing.
 
 ## VFX rules (create_vfx)
+- Start from presets when they fit, then change only what differs: a whole effect {preset: campfire|magicAura|explosion|portal|swordSlash|lightningArc|snowfall|healingPad, tint?, scale?, emitters? (added, or replacing a preset emitter of the same name)}, or one emitter {type: "particles", preset: flames|embers|smoke|sparks|flash|shockwave|fireball|puff|dust|glow|motes|aura|rise|snow|vortex|electric, ...overrides}. The same works for inline effects in abilities.
 - Coordinates are studs from the effect's root on the ground (y up). Keep effects compact: 2–6 emitters usually.
 - Glows and magic use lightEmission 1 with dark-to-transparent fades; smoke uses lightEmission 0 and grows while fading.
 - Fade with transparency [[0,0.2],[0.8,0.5],[1,1]] and shrink or grow size over life; vary speed, rotation and spin with [min,max] ranges.

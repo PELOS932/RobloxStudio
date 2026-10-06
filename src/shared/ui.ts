@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { FONT_NAMES, type FontName } from "./roblox-data.ts";
-import { hexColor, normalizeHex, uniqueName } from "./model.ts";
+import { hexColor, nameMatches, normalizeHex, uniqueName } from "./model.ts";
 
 export const UI_TYPES = ["Frame", "TextLabel", "TextButton", "TextBox", "ImageLabel", "ImageButton", "ScrollingFrame"] as const;
 export type UiType = (typeof UI_TYPES)[number];
@@ -272,6 +272,15 @@ export function cornerOf(n: UiNode): [number, number] | null {
 // ---------------------------------------------------------------------------
 // Editing (edit_ui tool)
 
+export const NodeWhereSchema = z.object({
+  name: z.string().optional(),
+  type: z.enum(UI_TYPES).optional(),
+  under: z.string().optional().describe("descendants of this node"),
+  bg: hexColor.optional(),
+  textColor: hexColor.optional(),
+});
+export type NodeWhere = z.infer<typeof NodeWhereSchema>;
+
 export const UiEditSchema = z.object({
   add: z.array(UiNodeSchema).optional().describe("new nodes (appended; set parent)"),
   update: z
@@ -280,8 +289,45 @@ export const UiEditSchema = z.object({
     .describe("partial updates matched by name; only listed fields change"),
   remove: z.array(z.string()).optional().describe("node names to delete (descendants are deleted too)"),
   rename: z.string().optional().describe("new ScreenGui name"),
+  updateWhere: z
+    .array(z.object({ where: NodeWhereSchema, set: UiNodeSchema.omit({ name: true, parent: true }).partial() }))
+    .max(50)
+    .optional()
+    .describe("bulk changes: every node matching all where filters gets set"),
+  recolor: z.record(z.string(), hexColor).optional().describe('swap colors everywhere (backgrounds, text, strokes, gradients, images): {"#old": "#new"}'),
 });
 export type UiEdit = z.infer<typeof UiEditSchema>;
+
+function nodeMatches(n: UiNode, w: NodeWhere, parentOf: Map<string, string | undefined>): boolean {
+  if (w.name !== undefined && !nameMatches(n.name, w.name)) return false;
+  if (w.type !== undefined && n.type !== w.type) return false;
+  if (w.bg !== undefined && normalizeHex(n.bg ?? "#ffffff") !== normalizeHex(w.bg)) return false;
+  if (w.textColor !== undefined && normalizeHex(n.textColor ?? "#ffffff") !== normalizeHex(w.textColor)) return false;
+  if (w.under !== undefined) {
+    let p = n.parent;
+    while (p !== undefined && p !== w.under) p = parentOf.get(p);
+    if (p === undefined) return false;
+  }
+  return true;
+}
+
+/** Swap colors on one node (explicit ones, plus the white background/text defaults). */
+function recolorNode(n: UiNode, map: Map<string, string>): UiNode {
+  const swap = (c: string | undefined) => (c === undefined ? undefined : map.get(normalizeHex(c)) ?? c);
+  const out: UiNode = { ...n };
+  const isText = n.type === "TextLabel" || n.type === "TextButton" || n.type === "TextBox";
+  const bg = swap(n.bg ?? "#ffffff");
+  if (bg !== (n.bg ?? "#ffffff")) out.bg = bg;
+  if (isText || n.textColor) {
+    const tc = swap(n.textColor ?? "#ffffff");
+    if (tc !== (n.textColor ?? "#ffffff")) out.textColor = tc;
+  }
+  for (const key of ["placeholderColor", "imageColor", "scrollColor"] as const) if (n[key]) out[key] = swap(n[key]);
+  if (n.stroke?.color) out.stroke = { ...n.stroke, color: swap(n.stroke.color) };
+  if (n.textStroke?.color) out.textStroke = { ...n.textStroke, color: swap(n.textStroke.color) };
+  if (n.gradient) out.gradient = { ...n.gradient, colors: n.gradient.colors.map((c) => swap(c)!) };
+  return out;
+}
 
 export function applyUiEdit(spec: UiSpec, edit: UiEdit): { spec: UiSpec; missing: string[]; warnings: string[] } {
   const missing: string[] = [];
@@ -312,6 +358,24 @@ export function applyUiEdit(spec: UiSpec, edit: UiEdit): { spec: UiSpec; missing
     const merged: Record<string, unknown> = { ...nodes[i] };
     for (const [k, v] of Object.entries(u)) if (v !== undefined) merged[k] = v;
     nodes[i] = merged as UiNode;
+  }
+  if (edit.updateWhere?.length) {
+    const parentOf = new Map(nodes.map((n) => [n.name, n.parent]));
+    for (const u of edit.updateWhere) {
+      let hits = 0;
+      nodes = nodes.map((n) => {
+        if (!nodeMatches(n, u.where, parentOf)) return n;
+        hits++;
+        return { ...n, ...u.set } as UiNode;
+      });
+      if (!hits) missing.push(`where ${JSON.stringify(u.where)}`);
+    }
+  }
+  if (edit.recolor) {
+    const map = new Map(Object.entries(edit.recolor).map(([a, b]) => [normalizeHex(a), normalizeHex(b)]));
+    const before = JSON.stringify(nodes);
+    nodes = nodes.map((n) => recolorNode(n, map));
+    if (JSON.stringify(nodes) === before) missing.push(`recolor: no node uses ${[...map.keys()].join(", ")}`);
   }
   if (edit.add?.length) nodes = nodes.concat(edit.add);
   const { spec: next, warnings } = sanitizeUiSpec({ ...spec, name: edit.rename ?? spec.name, nodes });

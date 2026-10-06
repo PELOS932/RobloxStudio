@@ -57,9 +57,9 @@ describe("token and payload budgets", () => {
   it("keeps the advertised tool list small without dropping required fields", () => {
     const list = forge.toolList;
     const json = JSON.stringify(list);
-    // ~8k tokens for 33 tools (models, UIs, animations, effects, abilities, scripts and the Studio
-    // power tools), served from the prompt cache after the first turn.
-    expect(json.length).toBeLessThan(33_000);
+    // ~9k tokens for 32 tools (models, UIs, animations, effects with presets, abilities, scripts and
+    // the Studio power tools), served from the prompt cache after the first turn.
+    expect(json.length).toBeLessThan(35_500);
     expect(json).not.toMatch(/"pattern":"/); // regex constraints are stripped (a property may be named pattern)
     expect(json).not.toContain("9007199254740991");
     const tool = (n: string) => list.find((t) => t.name === n)!.inputSchema;
@@ -67,6 +67,10 @@ describe("token and payload budgets", () => {
     expect(tool("create_ui").required).toEqual(expect.arrayContaining(["name", "nodes"]));
     expect(tool("edit_model").required).toEqual(["id"]);
     expect(tool("edit_ui").properties.add.description).toMatch(/create_ui/);
+    // Lookups are marked read-only so Claude Code runs several of them in parallel.
+    const hint = (n: string) => (list.find((t) => t.name === n) as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint;
+    expect(["studio_query", "studio_scripts", "studio_audit", "get_asset"].map(hint)).toEqual([true, true, true, true]);
+    expect(["studio_edit", "studio_script_patch", "create_model"].map(hint)).toEqual([undefined, undefined, undefined]);
   });
 
   it("writes only non-default properties in UI Luau", () => {
