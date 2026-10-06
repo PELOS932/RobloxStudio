@@ -1,16 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { NO_HIT, type PlaceScene, type PlaceTerrain, type ScenePart } from "../../shared/place.ts";
 import { matToEulerXYZDeg, rgbToHex } from "../../shared/math.ts";
 import { wedgeVertices } from "../../shared/model.ts";
 import type { MaterialName } from "../../shared/roblox-data.ts";
-import { materialFor, tileOf } from "../lib/materials.ts";
+import { materialFor, studioEnvironment, tileOf } from "../lib/materials.ts";
+import { createSelectiveBloom, markGlow, type SelectiveBloom } from "../lib/selective-bloom.ts";
 import { Icon } from "../lib/icons.tsx";
 
 // A read-only view of a whole place: parts are drawn with one instanced mesh per
@@ -94,7 +90,7 @@ function placeMaterial(name: string, transparency: number): THREE.Material {
   if (m) return m;
   if (name === "Neon") {
     // Instance colours tint the glow (an emissive colour can't be per instance).
-    m = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.2, 2.2), toneMapped: false, transparent: transparency > 0, opacity: 1 - transparency });
+    m = markGlow(new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 2.2, 2.2), toneMapped: false, transparent: transparency > 0, opacity: 1 - transparency }));
   } else {
     const base = materialFor((name in MATERIAL_SET ? name : "Plastic") as MaterialName, [255, 255, 255], transparency, 0);
     m = base.clone();
@@ -188,7 +184,7 @@ interface Engine {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
-  composer: EffectComposer;
+  composer: SelectiveBloom;
   sun: THREE.DirectionalLight;
   world: THREE.Group;
   pickables: THREE.InstancedMesh[];
@@ -216,15 +212,14 @@ export function PlaceViewer({ scene, onSelectInStudio, onAsk }: Props) {
     host.appendChild(renderer.domElement);
 
     const s = new THREE.Scene();
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    s.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const disposeEnv = studioEnvironment(renderer, s);
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 20000);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = false;
     controls.maxPolarAngle = Math.PI * 0.495;
-    s.add(new THREE.HemisphereLight(0xcfe3ff, 0x3a3631, 0.85));
+    s.add(new THREE.HemisphereLight(0xcfe3ff, 0x3a3631, 1.3));
     const sun = new THREE.DirectionalLight(0xfff3e0, 2.2);
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
@@ -234,11 +229,8 @@ export function PlaceViewer({ scene, onSelectInStudio, onAsk }: Props) {
     const world = new THREE.Group();
     s.add(world);
 
-    const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(s, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.4, 0.95);
-    composer.addPass(bloom);
-    composer.addPass(new OutputPass());
+    // Only Neon parts glow.
+    const composer = createSelectiveBloom(renderer, s, camera, { strength: 0.8, radius: 0.45 });
 
     // Big maps are expensive to draw, so frames are only rendered while something changes.
     let dirty = true;
@@ -266,7 +258,8 @@ export function PlaceViewer({ scene, onSelectInStudio, onAsk }: Props) {
       ro.disconnect();
       renderer.setAnimationLoop(null);
       controls.dispose();
-      pmrem.dispose();
+      disposeEnv();
+      composer.dispose();
       for (const o of world.children) (o as THREE.Mesh).geometry?.dispose();
       renderer.dispose();
       renderer.domElement.remove();

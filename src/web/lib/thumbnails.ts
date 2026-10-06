@@ -1,9 +1,8 @@
 // Small still renders of models for asset cards and the library. One shared offscreen
 // renderer draws them one at a time; results are cached per asset version.
 import * as THREE from "three";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { toNativeModel, type ModelSpec } from "../../shared/model.ts";
-import { materialFor, tileOf } from "./materials.ts";
+import { materialFor, studioEnvironment, tileOf } from "./materials.ts";
 import { partGeometry, partMatrix } from "./geometry.ts";
 import { animationLength, buildTracks, poseRig, RIGS, sampleTracks, type AnimationSpec } from "../../shared/animation.ts";
 import { applyPose, buildRig } from "./rig3d.ts";
@@ -35,8 +34,8 @@ function getEngine(): Engine {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   const scene = new THREE.Scene();
-  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x2a2622, 0.65));
+  studioEnvironment(renderer, scene);
+  scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x2a2622, 1.1));
   // Directional lights only care about direction, so a fixed position works for any model.
   const sun = new THREE.DirectionalLight(0xfff3e0, 2.4);
   sun.position.set(16, 28, 12);

@@ -1,7 +1,9 @@
 // Roblox-style materials for three.js. Each Enum.Material gets a procedural,
 // tileable texture (multiplied by the part color, like Roblox) plus PBR settings.
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { MaterialName } from "../../shared/roblox-data.ts";
+import { markGlow } from "./selective-bloom.ts";
 
 type Pattern =
   | "none" | "plastic" | "grain" | "planks" | "brick" | "cobble" | "stone" | "marble" | "speckle"
@@ -17,47 +19,47 @@ interface MatDef {
 }
 
 const DEFS: Record<MaterialName, MatDef> = {
-  Plastic: { pattern: "plastic", rough: 0.55, metal: 0, tile: 4, bump: 0.15 },
-  SmoothPlastic: { pattern: "none", rough: 0.42, metal: 0, tile: 4 },
+  Plastic: { pattern: "plastic", rough: 0.8, metal: 0, tile: 4, bump: 0.15 },
+  SmoothPlastic: { pattern: "none", rough: 0.62, metal: 0, tile: 4 },
   Neon: { pattern: "none", rough: 0.4, metal: 0, tile: 4 },
-  Wood: { pattern: "grain", rough: 0.72, metal: 0, tile: 4, bump: 0.6 },
-  WoodPlanks: { pattern: "planks", rough: 0.7, metal: 0, tile: 4, bump: 1 },
-  Marble: { pattern: "marble", rough: 0.25, metal: 0, tile: 6, bump: 0.2 },
+  Wood: { pattern: "grain", rough: 0.82, metal: 0, tile: 4, bump: 0.6 },
+  WoodPlanks: { pattern: "planks", rough: 0.82, metal: 0, tile: 4, bump: 1 },
+  Marble: { pattern: "marble", rough: 0.48, metal: 0, tile: 6, bump: 0.2 },
   Basalt: { pattern: "stone", rough: 0.85, metal: 0, tile: 6, bump: 1.2 },
   Slate: { pattern: "stone", rough: 0.8, metal: 0, tile: 5, bump: 1 },
   CrackedLava: { pattern: "cracks", rough: 0.8, metal: 0, tile: 6, bump: 1 },
   Concrete: { pattern: "concrete", rough: 0.88, metal: 0, tile: 5, bump: 0.6 },
   Limestone: { pattern: "concrete", rough: 0.85, metal: 0, tile: 6, bump: 0.5 },
-  Granite: { pattern: "speckle", rough: 0.6, metal: 0, tile: 4, bump: 0.5 },
+  Granite: { pattern: "speckle", rough: 0.75, metal: 0, tile: 4, bump: 0.5 },
   Pavement: { pattern: "tiles", rough: 0.85, metal: 0, tile: 6, bump: 0.8 },
   Brick: { pattern: "brick", rough: 0.85, metal: 0, tile: 4, bump: 1.2 },
   Pebble: { pattern: "cobble", rough: 0.8, metal: 0, tile: 3, bump: 1 },
   Cobblestone: { pattern: "cobble", rough: 0.85, metal: 0, tile: 5, bump: 1.4 },
   Rock: { pattern: "stone", rough: 0.9, metal: 0, tile: 7, bump: 1.4 },
   Sandstone: { pattern: "concrete", rough: 0.85, metal: 0, tile: 6, bump: 0.7 },
-  CorrodedMetal: { pattern: "rust", rough: 0.75, metal: 0.55, tile: 4, bump: 0.8 },
-  DiamondPlate: { pattern: "diamond", rough: 0.4, metal: 0.85, tile: 2, bump: 1.2 },
-  Foil: { pattern: "brushed", rough: 0.25, metal: 1, tile: 4, bump: 0.2 },
-  Metal: { pattern: "brushed", rough: 0.38, metal: 0.85, tile: 4, bump: 0.15 },
+  CorrodedMetal: { pattern: "rust", rough: 0.85, metal: 0.45, tile: 4, bump: 0.8 },
+  DiamondPlate: { pattern: "diamond", rough: 0.55, metal: 0.7, tile: 2, bump: 1.2 },
+  Foil: { pattern: "brushed", rough: 0.4, metal: 0.85, tile: 4, bump: 0.2 },
+  Metal: { pattern: "brushed", rough: 0.55, metal: 0.7, tile: 4, bump: 0.15 },
   Grass: { pattern: "speckle", rough: 0.95, metal: 0, tile: 4, bump: 0.8 },
   LeafyGrass: { pattern: "speckle", rough: 0.95, metal: 0, tile: 5, bump: 1 },
   Sand: { pattern: "speckle", rough: 0.95, metal: 0, tile: 3, bump: 0.4 },
   Fabric: { pattern: "weave", rough: 0.95, metal: 0, tile: 1.5, bump: 0.6 },
   Snow: { pattern: "speckle", rough: 0.9, metal: 0, tile: 4, bump: 0.3 },
-  Mud: { pattern: "stone", rough: 0.8, metal: 0, tile: 6, bump: 0.8 },
+  Mud: { pattern: "stone", rough: 0.85, metal: 0, tile: 6, bump: 0.8 },
   Ground: { pattern: "speckle", rough: 0.95, metal: 0, tile: 5, bump: 0.7 },
   Asphalt: { pattern: "speckle", rough: 0.9, metal: 0, tile: 3, bump: 0.5 },
-  Salt: { pattern: "speckle", rough: 0.8, metal: 0, tile: 3, bump: 0.4 },
-  Ice: { pattern: "cracks", rough: 0.1, metal: 0, tile: 8, bump: 0.2 },
-  Glacier: { pattern: "cracks", rough: 0.2, metal: 0, tile: 8, bump: 0.4 },
+  Salt: { pattern: "speckle", rough: 0.85, metal: 0, tile: 3, bump: 0.4 },
+  Ice: { pattern: "cracks", rough: 0.3, metal: 0, tile: 8, bump: 0.2 },
+  Glacier: { pattern: "cracks", rough: 0.42, metal: 0, tile: 8, bump: 0.4 },
   Glass: { pattern: "none", rough: 0.05, metal: 0, tile: 4 },
-  ForceField: { pattern: "none", rough: 0.2, metal: 0, tile: 4 },
+  ForceField: { pattern: "none", rough: 0.4, metal: 0, tile: 4 },
   Cardboard: { pattern: "concrete", rough: 0.9, metal: 0, tile: 3, bump: 0.3 },
   Carpet: { pattern: "weave", rough: 1, metal: 0, tile: 1, bump: 0.8 },
-  CeramicTiles: { pattern: "tiles", rough: 0.3, metal: 0, tile: 3, bump: 0.6 },
+  CeramicTiles: { pattern: "tiles", rough: 0.55, metal: 0, tile: 3, bump: 0.6 },
   ClayRoofTiles: { pattern: "roof", rough: 0.75, metal: 0, tile: 4, bump: 1.2 },
   RoofShingles: { pattern: "shingles", rough: 0.85, metal: 0, tile: 4, bump: 1 },
-  Leather: { pattern: "leather", rough: 0.6, metal: 0, tile: 2, bump: 0.6 },
+  Leather: { pattern: "leather", rough: 0.75, metal: 0, tile: 2, bump: 0.6 },
   Plaster: { pattern: "concrete", rough: 0.92, metal: 0, tile: 4, bump: 0.3 },
   Rubber: { pattern: "plastic", rough: 0.9, metal: 0, tile: 3, bump: 0.2 },
 };
@@ -268,6 +270,21 @@ function textureFor(pattern: Pattern): THREE.CanvasTexture | null {
   return t;
 }
 
+// ----------------------------------------------------------------- lighting
+
+/**
+ * Soft image-based light for part previews. Studio's default lighting is mostly diffuse, so the
+ * studio-room reflections are kept faint (Reflectance and metals still pick them up).
+ */
+export function studioEnvironment(renderer: THREE.WebGLRenderer, scene: THREE.Scene): () => void {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const env = pmrem.fromScene(new RoomEnvironment(), 0.04);
+  pmrem.dispose();
+  scene.environment = env.texture;
+  scene.environmentIntensity = 0.45;
+  return () => env.dispose();
+}
+
 // ----------------------------------------------------------------- materials
 
 const materialCache = new Map<string, THREE.Material>();
@@ -282,14 +299,14 @@ export function materialFor(name: MaterialName, rgb: [number, number, number], t
   let mat: THREE.Material;
 
   if (name === "Neon") {
-    mat = new THREE.MeshStandardMaterial({
+    mat = markGlow(new THREE.MeshStandardMaterial({
       color: new THREE.Color(0, 0, 0),
       emissive: color,
       emissiveIntensity: 2.4,
-      roughness: 0.5,
+      roughness: 0.9,
       transparent: transparency > 0,
       opacity,
-    });
+    }));
   } else if (name === "Glass") {
     mat = new THREE.MeshPhysicalMaterial({
       color,
@@ -297,9 +314,9 @@ export function materialFor(name: MaterialName, rgb: [number, number, number], t
       metalness: 0,
       transparent: true,
       opacity: Math.max(0.12, Math.min(0.85, opacity * 0.7)),
-      envMapIntensity: 1.6,
-      clearcoat: 1,
-      clearcoatRoughness: 0.05,
+      envMapIntensity: 1.2,
+      clearcoat: 0.6,
+      clearcoatRoughness: 0.1,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
@@ -321,7 +338,7 @@ export function materialFor(name: MaterialName, rgb: [number, number, number], t
       bumpScale: def.bump ?? 0,
       roughness: def.rough * (1 - reflectance * 0.8),
       metalness: Math.max(def.metal, reflectance * 0.6),
-      envMapIntensity: 1 + reflectance,
+      envMapIntensity: 1 + reflectance * 1.5,
       transparent: transparency > 0,
       opacity,
       depthWrite: transparency < 0.5,

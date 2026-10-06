@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import {
   animationLength, buildTracks, poseRig, RIGS, sampleTracks, unsupportedJoints, type AnimationSpec, type RigType,
 } from "../../shared/animation.ts";
+import { studioEnvironment } from "../lib/materials.ts";
 import { applyPose, buildRig, type RigMeshes } from "../lib/rig3d.ts";
 import { Icon } from "../lib/icons.tsx";
 
@@ -55,9 +55,8 @@ export function AnimationViewer({ spec, rig: rigProp, onRigChange, rigSwitch = t
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     host.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a2622, 0.7));
+    const disposeEnv = studioEnvironment(renderer, scene);
+    scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a2622, 1.1));
     const sun = new THREE.DirectionalLight(0xfff3e0, 2.2);
     sun.position.set(6, 12, -8);
     sun.castShadow = true;
@@ -115,7 +114,7 @@ export function AnimationViewer({ spec, rig: rigProp, onRigChange, rigSwitch = t
       renderer.setAnimationLoop(null);
       controls.dispose();
       engine.rig?.dispose();
-      pmrem.dispose();
+      disposeEnv();
       renderer.dispose();
       renderer.domElement.remove();
       engineRef.current = null;

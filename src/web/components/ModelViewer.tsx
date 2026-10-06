@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { toNativeModel, type ModelSpec, type NativePart } from "../../shared/model.ts";
 import { optimizeParts } from "../../shared/optimize.ts";
 import { rgbToHex, matToEulerXYZDeg } from "../../shared/math.ts";
-import { materialFor, tileOf } from "../lib/materials.ts";
+import { materialFor, studioEnvironment, tileOf } from "../lib/materials.ts";
+import { createSelectiveBloom, type SelectiveBloom } from "../lib/selective-bloom.ts";
 import { faceNormal, partGeometry, partMatrix } from "../lib/geometry.ts";
 import { Icon } from "../lib/icons.tsx";
 
@@ -23,7 +19,7 @@ interface Engine {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
-  composer: EffectComposer;
+  glow: SelectiveBloom;
   sun: THREE.DirectionalLight;
   model: THREE.Group;
   grid: THREE.GridHelper;
@@ -61,8 +57,7 @@ export function ModelViewer({ spec, onReference }: Props) {
     host.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const disposeEnv = studioEnvironment(renderer, scene);
     scene.fog = new THREE.Fog(0x0b0b0c, 200, 900);
 
     const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 5000);
@@ -72,7 +67,7 @@ export function ModelViewer({ spec, onReference }: Props) {
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
 
-    scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x2a2622, 0.65));
+    scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x2a2622, 1.1));
     const sun = new THREE.DirectionalLight(0xfff3e0, 2.4);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -92,14 +87,11 @@ export function ModelViewer({ spec, onReference }: Props) {
     const model = new THREE.Group();
     scene.add(model);
 
-    const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.45, 0.92);
-    composer.addPass(bloom);
-    composer.addPass(new OutputPass());
+    // Only Neon parts glow (like Roblox); lit surfaces never do.
+    const glow = createSelectiveBloom(renderer, scene, camera, { strength: 0.7, radius: 0.5 });
 
     const engine: Engine = {
-      renderer, scene, camera, controls, composer, sun, model, grid, ground, selection: null, meshes: [],
+      renderer, scene, camera, controls, glow, sun, model, grid, ground, selection: null, meshes: [],
       fit: () => {},
       dispose: () => {},
     };
@@ -107,8 +99,7 @@ export function ModelViewer({ spec, onReference }: Props) {
     const resize = () => {
       const w = host.clientWidth || 1, h = host.clientHeight || 1;
       renderer.setSize(w, h, false);
-      composer.setSize(w, h);
-      bloom.setSize(w, h);
+      glow.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
     };
@@ -118,14 +109,15 @@ export function ModelViewer({ spec, onReference }: Props) {
 
     renderer.setAnimationLoop(() => {
       controls.update();
-      composer.render();
+      glow.render();
     });
 
     engine.dispose = () => {
       ro.disconnect();
       renderer.setAnimationLoop(null);
       controls.dispose();
-      pmrem.dispose();
+      disposeEnv();
+      glow.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
@@ -271,7 +263,7 @@ export function ModelViewer({ spec, onReference }: Props) {
   const exportPng = () => {
     const e = engineRef.current;
     if (!e) return;
-    e.composer.render();
+    e.glow.render();
     const a = document.createElement("a");
     a.download = `${spec.name.replace(/[^\w-]+/g, "_")}.png`;
     a.href = e.renderer.domElement.toDataURL("image/png");

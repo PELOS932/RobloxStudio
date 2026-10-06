@@ -61,7 +61,7 @@ export function buildRig(rig: Rig): RigMeshes {
   const material = (color: string) => {
     let m = shared.get(color);
     if (!m) {
-      m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.72, metalness: 0 });
+      m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.85, metalness: 0 });
       shared.set(color, m);
       materials.push(m);
     }

@@ -2,8 +2,8 @@
 // orbit camera, optional bloom, backdrops, and camera framing helpers.
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { createGlow, type Glow } from "./glow.ts";
+import { studioEnvironment } from "./materials.ts";
 
 export const BACKDROPS = { night: 0x0d0e12, dusk: 0x2a2f3d, day: 0x9fb6c9 } as const;
 export type Backdrop = keyof typeof BACKDROPS;
@@ -31,12 +31,11 @@ export function createStage(host: HTMLElement, opts: { characters?: boolean } = 
   }
   host.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
-  let pmrem: THREE.PMREMGenerator | null = null;
+  let disposeEnv: (() => void) | null = null;
   if (opts.characters) {
     // Rigs are lit like the animation viewer, dimmer so effects stand out.
-    pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.45;
+    disposeEnv = studioEnvironment(renderer, scene);
+    scene.environmentIntensity = 0.35;
     const sun = new THREE.DirectionalLight(0xfff3e0, 1.4);
     sun.position.set(8, 14, -6);
     sun.castShadow = true;
@@ -99,7 +98,7 @@ export function createStage(host: HTMLElement, opts: { characters?: boolean } = 
       renderer.setAnimationLoop(null);
       controls.dispose();
       glow.dispose();
-      pmrem?.dispose();
+      disposeEnv?.();
       renderer.dispose();
       renderer.domElement.remove();
     },
