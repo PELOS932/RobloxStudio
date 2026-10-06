@@ -4077,6 +4077,12 @@ a.btn { text-decoration: none; }
 .anim-key.ability-key.travel {
   background: #ff6b2c;
 }
+.anim-key.ability-key.summon {
+  background: #a78bff;
+}
+.anim-key.ability-key.prop {
+  background: #8fd18f;
+}
 .vfx-tex {
   pointer-events: auto;
   display: inline-flex;

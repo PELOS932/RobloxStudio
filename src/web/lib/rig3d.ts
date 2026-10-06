@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { Rig } from "../../shared/animation.ts";
 import type { Mat3, Vec3 } from "../../shared/math.ts";
+import { markGlow } from "./selective-bloom.ts";
 
 const faces = new Map<string, THREE.CanvasTexture>();
 
@@ -49,16 +50,48 @@ function face(kind: "smile" | "neutral"): THREE.CanvasTexture {
 export interface RigMeshes {
   group: THREE.Group;
   parts: Map<string, THREE.Object3D>;
+  /** Fade a rig built with a look (0 = invisible, 1 = as built). */
+  fade: (f: number) => void;
   dispose: () => void;
 }
 
-export function buildRig(rig: Rig): RigMeshes {
+/** A summon's look: Roblox material, colour and transparency for every part. */
+export interface RigLook {
+  color: string;
+  material: "ForceField" | "Neon" | "Glass" | "SmoothPlastic" | "Plastic";
+  transparency: number;
+}
+
+function lookMaterial(look: RigLook): { material: THREE.Material; opacity: number } {
+  const color = new THREE.Color(look.color);
+  const shown = 1 - look.transparency;
+  switch (look.material) {
+    case "ForceField": {
+      // Roblox's ForceField material: a glowing, see-through energy shell.
+      const opacity = 0.1 + shown * 0.4;
+      return { material: markGlow(new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false })), opacity };
+    }
+    case "Neon":
+      return { material: markGlow(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: color, emissiveIntensity: 2.2, transparent: true, opacity: shown })), opacity: shown };
+    case "Glass": {
+      const opacity = 0.1 + shown * 0.45;
+      return { material: new THREE.MeshPhysicalMaterial({ color, roughness: 0.08, transparent: true, opacity, depthWrite: false }), opacity };
+    }
+    default:
+      return { material: new THREE.MeshStandardMaterial({ color, roughness: look.material === "SmoothPlastic" ? 0.6 : 0.8, transparent: true, opacity: shown }), opacity: shown };
+  }
+}
+
+export function buildRig(rig: Rig, look?: RigLook): RigMeshes {
   const group = new THREE.Group();
   const parts = new Map<string, THREE.Object3D>();
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
   const shared = new Map<string, THREE.MeshStandardMaterial>();
-  const material = (color: string) => {
+  const looked = look ? lookMaterial(look) : null;
+  if (looked) materials.push(looked.material);
+  const material = (color: string): THREE.Material => {
+    if (looked) return looked.material;
     let m = shared.get(color);
     if (!m) {
       m = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.85, metalness: 0 });
@@ -67,6 +100,7 @@ export function buildRig(rig: Rig): RigMeshes {
     }
     return m;
   };
+  const faces = !look || look.material === "Plastic" || look.material === "SmoothPlastic";
   for (const p of rig.parts) {
     if (p.hidden) continue;
     const holder = new THREE.Group();
@@ -79,15 +113,17 @@ export function buildRig(rig: Rig): RigMeshes {
       const geo = new RoundedBoxGeometry(s, s, s, 4, r6 ? 0.34 : 0.2);
       geometries.push(geo);
       mesh = new THREE.Mesh(geo, material(p.color));
-      const decalGeo = new THREE.PlaneGeometry(s * 0.82, s * 0.82);
-      geometries.push(decalGeo);
-      const decalMat = new THREE.MeshStandardMaterial({ map: face(r6 ? "smile" : "neutral"), transparent: true, depthWrite: false, roughness: 0.8 });
-      materials.push(decalMat);
-      const decal = new THREE.Mesh(decalGeo, decalMat);
-      // Characters face -Z; the face sits on the front of the head, facing out.
-      decal.position.set(0, 0, -s / 2 - 0.004);
-      decal.rotation.y = Math.PI;
-      mesh.add(decal);
+      if (faces) {
+        const decalGeo = new THREE.PlaneGeometry(s * 0.82, s * 0.82);
+        geometries.push(decalGeo);
+        const decalMat = new THREE.MeshStandardMaterial({ map: face(r6 ? "smile" : "neutral"), transparent: true, depthWrite: false, roughness: 0.8 });
+        materials.push(decalMat);
+        const decal = new THREE.Mesh(decalGeo, decalMat);
+        // Characters face -Z; the face sits on the front of the head, facing out.
+        decal.position.set(0, 0, -s / 2 - 0.004);
+        decal.rotation.y = Math.PI;
+        mesh.add(decal);
+      }
     } else {
       // Slightly inset, softly rounded blocks read like Roblox parts without z-fighting at joints.
       const [x, y, z] = p.size;
@@ -95,8 +131,8 @@ export function buildRig(rig: Rig): RigMeshes {
       geometries.push(geo);
       mesh = new THREE.Mesh(geo, material(p.color));
     }
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.castShadow = !look || look.material === "Plastic" || look.material === "SmoothPlastic";
+    mesh.receiveShadow = !look;
     holder.add(mesh);
     group.add(holder);
     parts.set(p.name, holder);
@@ -104,6 +140,11 @@ export function buildRig(rig: Rig): RigMeshes {
   return {
     group,
     parts,
+    fade: (f: number) => {
+      if (!looked) return;
+      looked.material.opacity = looked.opacity * Math.max(0, Math.min(1, f));
+      looked.material.visible = f > 0.002;
+    },
     dispose: () => {
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();

@@ -10,7 +10,7 @@ import { abilityTrees, animationHash, playSource, standaloneTool } from "../src/
 import { abilityToLuau } from "../src/shared/to-luau.ts";
 import { abilityToRbxmx } from "../src/shared/to-rbxmx.ts";
 import { sanitizeVfxSpec, VfxSpecSchema } from "../src/shared/vfx.ts";
-import { sanitizeAnimationSpec, AnimationSpecSchema, RIGS } from "../src/shared/animation.ts";
+import { bakedKeyframes, sanitizeAnimationSpec, AnimationSpecSchema, RIGS } from "../src/shared/animation.ts";
 
 const LUNE = process.env.LUNE_BIN ?? "lune";
 let luneAvailable = true;
@@ -26,7 +26,7 @@ const none = () => undefined;
 
 describe("ability specs", () => {
   it("ships valid starter abilities with sensible lengths", () => {
-    expect(starters.map((s) => s.name)).toEqual(["Fireball", "Lightning Strike", "Healing Aura", "Ground Slam", "Frost Nova", "Blade Slash"]);
+    expect(starters.map((s) => s.name)).toEqual(["Fireball", "Lightning Strike", "Healing Aura", "Ground Slam", "Frost Nova", "Blade Slash", "Stand Barrage", "Spirit Sword", "Earth Wall"]);
     for (const s of starters) {
       const r = resolveAbility(s, none);
       expect(r.missing).toEqual([]);
@@ -136,15 +136,23 @@ describe.skipIf(!luneAvailable)("abilities in Studio (executed in Lune)", () => 
     expect(exported.play).toBe("ok");
     expect(exported.animation).toEqual(imported.animation);
     expect(exported.effects).toEqual(imported.effects);
-    expect(imported.animation.keyframes).toHaveLength(r.animation!.keyframes.length);
+    expect(imported.animation.keyframes).toHaveLength(bakedKeyframes(r.animation!).length);
+    expect(exported.summons).toEqual(imported.summons);
+    expect(exported.props).toEqual(imported.props);
+    expect(Object.keys(imported.summons ?? {})).toEqual(r.summons.map((m) => m.templateName));
+    expect(Object.keys(imported.props ?? {})).toEqual(r.props.map((p) => p.templateName));
     expect(imported.animation.loop).toBe(false);
-    expect(Object.keys(imported.effects).sort()).toEqual(r.events.flatMap((e) => [e.templateName, ...(e.impactName ? [e.impactName] : [])]).sort());
+    expect(Object.keys(imported.effects).sort()).toEqual([
+      ...r.events.flatMap((e) => [e.templateName, ...(e.impactName ? [e.impactName] : [])]),
+      ...r.summons.flatMap((m) => (m.auraName ? [m.auraName] : [])),
+      ...r.props.flatMap((p) => (p.impactName ? [p.impactName] : [])),
+    ].sort());
   });
 });
 
 describe.skipIf(!luneAvailable)("casting abilities in Studio (Play module run in Lune with a simulated clock)", () => {
   const dir = mkdtempSync(join(tmpdir(), "forge-cast-"));
-  type Run = { effects: { name: string; spawn: number; removed?: number; start: number[]; last: number[] }[]; emits: Record<string, number>; errors: string[]; registered: number };
+  type Run = { effects: { name: string; spawn: number; removed?: number; start: number[]; last: number[]; samples: Record<string, number[]> | number[][]; shown: number; visible: number }[]; emits: Record<string, number>; errors: string[]; registered: number };
   const cast = (spec: AbilitySpec, seconds = 7): Run => {
     const r = resolveAbility(spec, none);
     const rig = RIGS[spec.rig];
@@ -179,6 +187,54 @@ describe.skipIf(!luneAvailable)("casting abilities in Studio (Play module run in
     expect(ball.removed! - impact.spawn).toBeGreaterThan(0.5);
     expect(run.emits).toEqual({ Flash: 1, Shockwave: 1, Blast: 14, Smoke: 10, Sparks: 30 });
     for (const e of run.effects) expect(e.removed, e.name).toBeDefined();
+  });
+
+  it("Stand Barrage: the Stand fades in behind the caster, rushes in front, punches, comes back and goes", () => {
+    const run = cast(byName("Stand Barrage"), 4);
+    expect(run.errors).toEqual([]);
+    const stand = run.effects.find((e) => e.name === "Stand")!;
+    expect(stand.spawn).toBeCloseTo(0.1, 1);
+    // Behind the right shoulder, a stud above the caster's root (2.92).
+    expect(stand.start[0]).toBeCloseTo(1.6, 1);
+    expect(stand.start[1]).toBeCloseTo(3.92, 1);
+    expect(stand.start[2]).toBeCloseTo(2.2, 1);
+    const at = (t: number) => (stand.samples as Record<string, number[]>)[String(Math.floor(t / 0.25))];
+    expect(at(1)[3]).toBeCloseTo(-2.8, 1); // in front while it punches
+    expect(at(1)[4]).toBeGreaterThan(0.8); // fully shown (ForceField at 0.15 transparency)
+    expect(stand.removed!).toBeGreaterThan(2.3);
+    expect(stand.removed!).toBeLessThan(2.45);
+    expect(stand.last[2]).toBeCloseTo(2.2, 0);
+    const aura = run.effects.find((e) => e.name === "Stand Aura")!;
+    expect(aura.spawn).toBeCloseTo(0.1, 1);
+    expect(aura.removed!).toBeGreaterThan(stand.removed!);
+    expect(run.registered).toBe(2); // the caster's and the Stand's own animation
+  });
+
+  it("Earth Wall: three pillars rise out of the ground in front, hold, then sink and go", () => {
+    const run = cast(byName("Earth Wall"), 4);
+    expect(run.errors).toEqual([]);
+    const pillars = run.effects.filter((e) => /^Pillar/.test(e.name));
+    expect(pillars.map((p) => p.name)).toEqual(["Pillar", "Pillar 2", "Pillar 3"]);
+    for (const p of pillars) {
+      const samples = Object.values(p.samples as unknown as Record<string, number[]>);
+      expect(p.start[1]).toBeLessThan(-1); // starts underground (rising)
+      expect(Math.max(...samples.map((x) => x[2]))).toBeCloseTo(0, 1); // stands on the ground
+      expect(p.start[2]).toBeLessThan(-4);
+      expect(p.removed!).toBeGreaterThan(2.4);
+    }
+    expect(pillars[1].start[0]).toBeCloseTo(0, 1);
+  });
+
+  it("Spirit Sword: the blade appears in the right hand and fades after the slash", () => {
+    const run = cast(byName("Spirit Sword"), 3);
+    expect(run.errors).toEqual([]);
+    const blade = run.effects.find((e) => e.name === "Spirit Blade")!;
+    expect(blade.spawn).toBeCloseTo(0.05, 1);
+    expect(blade.start).toEqual([1.5, 1.92, 0]); // the right hand of a dummy at rest
+    expect(blade.shown).toBe(1);
+    // Shown until 1.05 s, then a 0.15 s fade.
+    expect(blade.removed!).toBeGreaterThan(1.15);
+    expect(blade.removed!).toBeLessThan(1.3);
   });
 
   it.each(starters.map((s) => [s.name, s] as const))("%s: every effect appears on cue without script errors", (_name, spec) => {

@@ -73,8 +73,7 @@ export const POSES = {
     rightShoulder: [150, 0, 30], rightElbow: [60, 0, 0], leftShoulder: [40, 0, -10], leftElbow: [60, 0, 0],
   },
   slash: {
-    root: { pos: [0, -0.27, 0] }, waist: [-15, 30, 0], neck: [0, -25, 0],
-    rightHip: [45, 0, 0], rightKnee: [-45, 0, 0], leftHip: [-20, 0, 0], leftKnee: [-25, 0, 0], leftAnkle: [45, 0, 0],
+    ...STANCE, waist: [-15, 30, 0], neck: [0, -25, 0],
     rightShoulder: [60, 0, -30], rightElbow: [10, 0, 0], leftShoulder: [-20, 0, -20], leftElbow: [30, 0, 0],
   },
   point: {

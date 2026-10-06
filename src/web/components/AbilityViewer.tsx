@@ -26,7 +26,11 @@ export function AbilityViewer({ resolved, rig, onRigChange, compact = false }: {
   const [view, setView] = useState<AbilityView>(() => defaultView(resolved));
   const length = resolved.length;
   const markers = useMemo(
-    () => resolved.events.map((e) => ({ t: e.event.at, label: `${e.event.name ?? e.vfx.name} · ${e.event.at}s${e.event.travel ? " (projectile)" : ""}`, travel: !!e.event.travel })),
+    () => [
+      ...resolved.events.map((e) => ({ t: e.event.at, label: `${e.event.name ?? e.vfx.name} · ${e.event.at}s${e.event.travel ? " (projectile)" : ""}`, kind: e.event.travel ? "travel" : "" })),
+      ...resolved.summons.map((m) => ({ t: m.summon.at, label: `${m.templateName} (summon) · ${m.summon.at}–${m.until}s`, kind: "summon" })),
+      ...resolved.props.map((p) => ({ t: p.prop.at, label: `${p.templateName} (prop) · ${p.prop.at}–${p.until}s`, kind: "prop" })),
+    ],
     [resolved],
   );
 
@@ -151,7 +155,7 @@ export function AbilityViewer({ resolved, rig, onRigChange, compact = false }: {
           onPointerMove={(e) => e.buttons === 1 && scrubTo(e.clientX)}
         >
           {markers.map((m, i) => (
-            <i key={i} className={`anim-key ability-key ${m.travel ? "travel" : ""}`} style={{ left: `${(m.t / length) * 100}%` }} title={m.label} />
+            <i key={i} className={`anim-key ability-key ${m.kind}`} style={{ left: `${(m.t / length) * 100}%` }} title={m.label} />
           ))}
           <span className="anim-fill" style={{ width: `${(time / length) * 100}%` }} />
           <span className="anim-cursor" style={{ left: `${(time / length) * 100}%` }} />

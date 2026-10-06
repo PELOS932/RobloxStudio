@@ -73,6 +73,8 @@ You are running inside Studio Forge, a local web app that connects Claude Code t
 - attach: rightHand/leftHand/head/torso/feet follow the body part; ground stays on the floor under the character; world stays where the character stood. Use follow "part" for blade trails (the part's -y runs along the arm past the hand).
 - Projectiles: travel.velocity like [0, -2, -50] with a duration long enough to land; give them an impact effect (one-shot bursts). Keep each effect compact; inline effects are fine, or reuse effect ids from the library.
 - Inline animations use create_animation keyframes (rig = the ability's). Make it readable: windup, release, follow-through, recover.
+- Summons are figures that appear with the ability: a Stand behind the player (default offset), a clone, a spirit. Give them their own animation (a Stand's punch barrage) or "caster" to mirror the player, a path to move (rush in front, then back), a material/color (ForceField = ghostly, Neon = glowing) and an aura effect.
+- Props are models that appear with it: a blade growing in the hand (appear grow), shields, rock walls rising from the ground (attach ground, appear rise, vanish sink), thrown objects (travel + impact). Build them inline like create_model; the model's origin is the grip.
 
 ## UI rules
 - nodes is a flat list; children set parent to the parent's name; list order = sibling order.

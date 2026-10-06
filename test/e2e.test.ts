@@ -239,7 +239,7 @@ describe.skipIf(!luneAvailable)("end to end", () => {
     expect(check).toMatchObject({ ok: true, output: "3 Blast,Blast Impact,Fist Tool" });
 
     const starters = (await api("/api/abilities/starters", { method: "POST" })).body;
-    expect(starters.ids).toHaveLength(6);
+    expect(starters.ids).toHaveLength(9);
     const rbxmx = await (await fetch(`${BASE}/api/assets/${starters.ids[0]}/export?format=rbxmx`)).text();
     expect(rbxmx).toMatch(/^<roblox version="4">\n<Item class="Tool"/);
     expect(rbxmx).toContain('<Item class="KeyframeSequence"');
@@ -266,6 +266,10 @@ describe.skipIf(!luneAvailable)("end to end", () => {
       "Workspace.Post.Pole [Part] Color=#ff0000",
       "Workspace.Post.Bulb [Part] Color=#ffcc66",
     ]);
+    expect(results[9]).toMatch(/^Created ability "Ghost Punch" \(id b_\w{6}, v1, .*R15/);
+    expect(results[9]).toMatch(/Imported in Studio at ReplicatedStorage\.Abilities\.Ghost Punch/);
+    const ghost = (await api("/api/studio/run", { method: "POST", body: JSON.stringify({ code: 'local f = game:GetService("ReplicatedStorage").Abilities["Ghost Punch"] local s = f.Summons.Stand local n = 0 for _, d in s:GetDescendants() do if d:IsA("Motor6D") then n += 1 end end return n .. " " .. s.HumanoidRootPart.Material.Name .. " " .. f.Props.Prop.Ring.Material.Name .. " " .. tostring(f.Effects:FindFirstChild("Stand Aura") ~= nil)' }) })).body;
+    expect(ghost, JSON.stringify(ghost)).toMatchObject({ ok: true, output: "15 ForceField Metal true" });
     const blast = (await api("/api/state")).body.assets.find((a: { name: string }) => a.name === "Blue Blast");
     const spec = (await api(`/api/assets/${blast.id}`)).body.spec;
     expect(spec.emitters[0]).toMatchObject({ name: "Flash", size: [[0, 2], [1, 6]] });

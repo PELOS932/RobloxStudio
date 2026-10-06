@@ -229,6 +229,12 @@ for await (const line of createInterface({ input: process.stdin })) {
     await toolCall("studio_audit", { path: "ServerScriptService.Gate" });
     await toolCall("studio_edit", { ops: [{ op: "select", path: "Workspace.Post" }] });
     await toolCall("studio_query", { path: "@selection", class: "BasePart", props: ["Color"] });
+    await toolCall("create_ability", {
+      name: "Ghost Punch", rig: "R15",
+      animation: { loop: false, keyframes: [{ t: 0, pose: "guard" }, { t: 0.2, pose: "punch" }, { t: 0.5, from: 0 }] },
+      summons: [{ at: 0, animation: "caster", vfx: { preset: "magicAura", scale: 0.3 } }],
+      props: [{ at: 0, attach: "leftHand", model: { styles: { gold: { color: "#e8c46a", material: "Metal" } }, parts: [{ name: "Ring", size: [1, 0.3, 1], pos: [0, 0, 0], style: "gold" }] } }],
+    });
     streamText("Done.");
   } else if (/studio context/i.test(prompt)) {
     // Echo what Studio Forge added after the user's text (the live Studio context).

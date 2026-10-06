@@ -409,7 +409,8 @@ export function animationToRbxmx(spec: AnimationSpec, opts: ImportOptions = {}):
 const XML_NAMES: Record<string, Record<string, string>> = {
   Fire: { Heat: "heat_xml", Size: "size_xml" },
   Smoke: { Opacity: "opacity_xml", RiseVelocity: "riseVelocity_xml", Size: "size_xml" },
-  Part: { Size: "size" },
+  Part: { Size: "size", Shape: "shape", Color: "Color3uint8" },
+  WedgePart: { Size: "size", Color: "Color3uint8" },
   Model: { WorldPivot: "WorldPivotData" },
 };
 
@@ -422,6 +423,7 @@ function xmlProp(className: string, key: string, v: PropValue, refs: Map<string,
   if ("enum" in v) return token(name, v.token);
   if ("v3" in v) return vec3(name, v.v3);
   if ("v2" in v) return vec2(name, v.v2);
+  if ("rgb" in v && name === "Color3uint8") return `<Color3uint8 name="Color3uint8">${(Math.round(v.rgb[0]) << 16) | (Math.round(v.rgb[1]) << 8) | Math.round(v.rgb[2])}</Color3uint8>`;
   if ("rgb" in v) return color3rgb(name, v.rgb);
   if ("range" in v) return `<NumberRange name="${name}">${num(v.range[0])} ${num(v.range[1])} </NumberRange>`;
   // The legacy name for older Studio builds, plus the newer Content property (TextureContent…).

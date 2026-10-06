@@ -53,7 +53,7 @@ end
 local function pivotOf(model)
 	if model:IsA("BasePart") then return model.CFrame end
 	-- (Lune's Clone doesn't remap PrimaryPart to the copy, so look the root up by name.)
-	local root = model:FindFirstChild("Root") or model.PrimaryPart
+	local root = model:FindFirstChild("Root") or model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 	return if root then root.CFrame else CFrame.new()
 end
 local fakeGame = {
@@ -138,10 +138,21 @@ while now < seconds do
 		present[m] = true
 		local p = pivotOf(m).Position
 		if not seen[m] then
-			seen[m] = { name = m.Name, spawn = r(now), start = { r(p.X), r(p.Y), r(p.Z) } }
+			seen[m] = { name = m.Name, spawn = r(now), start = { r(p.X), r(p.Y), r(p.Z) }, samples = {}, shown = 0 }
 			table.insert(order, m)
 		end
-		seen[m].last = { r(p.X), r(p.Y), r(p.Z) }
+		local s = seen[m]
+		s.last = { r(p.X), r(p.Y), r(p.Z) }
+		-- How visible it is (summons and props fade): 1 - the lowest transparency of its parts.
+		local lowest = 1
+		for _, d in m:GetDescendants() do
+			if d:IsA("BasePart") and d.Name ~= "Root" and d.Name ~= "HumanoidRootPart" then lowest = math.min(lowest, d.Transparency) end
+		end
+		s.visible = r(1 - lowest)
+		s.shown = math.max(s.shown, s.visible)
+		-- Where it is every quarter second.
+		local slot = tostring(math.floor((now + 1e-6) / 0.25))
+		if not s.samples[slot] then s.samples[slot] = { r(now), r(p.X), r(p.Y), r(p.Z), s.visible } end
 	end
 	for _, m in order do
 		if not present[m] and not seen[m].removed then seen[m].removed = r(now) end

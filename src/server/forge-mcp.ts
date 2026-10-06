@@ -488,9 +488,11 @@ export class ForgeMcp {
       {
         name: "create_ability",
         description:
-          "Create (or replace, with id) an ability: an animation plus effects timed to it (fireballs, slams, auras, slashes), previewed on an R15/R6 dummy. Import adds ReplicatedStorage.Abilities.<name> (require(...Play)(character) casts it) and a StarterPack Tool to try it.",
+          "Create (or replace, with id) an ability: an animation plus effects timed to it (fireballs, slams, auras, slashes), summons (a Stand behind the player, clones, spirits) and props (a sword in the hand, rock walls, thrown objects), previewed on an R15/R6 dummy. Import adds ReplicatedStorage.Abilities.<name> (require(...Play)(character) casts it) and a StarterPack Tool to try it.",
         schema: AbilitySpecInputSchema.extend({ id: id.optional().describe("replace this existing ability") }),
         advertise: (s) => looseItems(loose(s, { animation: "animation id (a_…) or inline {keyframes, loop?, priority?} as in create_animation" }), {
+          summons: `[{at, duration?, name?, animation?: "caster" (mimics the caster in sync) | a_ id | inline keyframes, offset?: [x,y,z] from the caster (default [1.6,1,2.2]: behind the right shoulder; forward is -z), path?: [{t: s after it appears, offset}] (e.g. rush in front), turn?, color?, material?: ForceField|Neon|Glass|SmoothPlastic|Plastic, transparency?, scale? (1.15), appear?: fade|grow|pop, fade?, hover?, vfx?: aura (effect id or inline)}]`,
+          props: `[{at, duration?, name?, model: m_ id | inline {parts} like create_model (origin = the grip; in a hand -y runs past the fingers, -z forward), attach? (default rightHand; ground/world for walls), offset?, rot?, follow?: part|character, scale?, appear?: fade|grow|pop|rise, vanish?: fade|shrink|pop|sink, fade?, spin? deg/s, travel?, impact?}]`,
           events: `[{at: seconds, vfx: effect id (v_…) or inline create_vfx input (e.g. {preset: ${EFFECT_PRESET_NAMES.slice(0, 3).join("|")}…, tint?, scale?} or {emitters}), attach?: ${ATTACH_POINTS.join("|")} (default root), offset?: [x,y,z] in the character's frame (x right, y up, z back; forward is -z), follow?: character|part, duration?: s (default 1), travel?: {velocity: [x,y,z] studs/s in the character's frame, gravity?, stopOnHit?}, impact?: effect id or inline effect played where it lands, scale?, name?}]`,
         }),
         run: async ({ id: replaceId, ...raw }, ctx) => {
@@ -501,11 +503,13 @@ export class ForgeMcp {
       },
       {
         name: "edit_ability",
-        description: "Change an ability: update events by index (only listed fields; null removes one), add or remove events, tint every inline effect, or change rig, animation, length or cooldown.",
+        description: "Change an ability: update events by index (only listed fields; null removes one), add or remove events, replace summons or props (same format as create_ability), tint everything, or change rig, animation, length or cooldown.",
         schema: AbilityEditSchema.extend({ id }),
         advertise: (s) => looseItems(loose(s, { animation: "animation id or inline keyframes, as in create_ability" }), {
           add: "new events, same format as create_ability events",
           update: "[{index, ...fields to change}] (indexes as in get_asset, sorted by at)",
+          summons: "replaces all summons; same format as create_ability ([] removes them)",
+          props: "replaces all props; same format as create_ability ([] removes them)",
         }),
         run: async ({ id: assetId, ...edit }, ctx) => {
           const prev = assets.get(assetId);
