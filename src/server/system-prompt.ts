@@ -35,6 +35,7 @@ You are running inside Studio Forge, a local web app that connects Claude Code t
 - Independent lookups (studio_query, studio_scripts, get_asset…) can go in the same reply: they run in parallel.
 - studio_execute_luau: keep snippets small and return compact values (a short string or number), not whole trees.
 - Use studio_screenshot when visual confirmation matters, not after every step.
+- preview_frames shows you an animation, effect or ability at several moments (models from four sides). After making or changing one, look once and fix what's off (a limb bending wrong, feet in the floor, an effect in the wrong place or too big), then stop; ask for exact times to inspect a moment.
 
 ## Model rules (studs, Y up)
 - Ground is y=0: keep part bottoms at y ≥ 0. The importer places the model by its bottom-center.

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, socket } from "./lib/api.ts";
 import type {
   Asset, AssetSummary, ChatMessage, ClaudeStatus, ContextState, Conversation, ConversationMeta, ConvStatus, Game,
-  HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
+  FramesRequest, HtmlConvertRequest, ImportResult, PermissionRequest, PlanUsage, QueuedMessage, ServerEvent, Settings, StudioStatus,
 } from "../shared/protocol.ts";
 
 export type RightTab = "preview" | "assets" | "place" | "studio";
@@ -246,6 +246,19 @@ function onEvent(e: ServerEvent) {
     case "convert.html":
       void handleConvert(e.id, e.request);
       break;
+    case "render.frames":
+      void handleFrames(e.id, e.request);
+      break;
+  }
+}
+
+/** The server asks this tab to draw frames for Claude to look at (it needs WebGL). */
+async function handleFrames(id: string, request: FramesRequest) {
+  try {
+    const { renderFrames } = await import("./lib/filmstrip.ts");
+    socket.send({ type: "render.result", id, image: await renderFrames(request) });
+  } catch (err) {
+    socket.send({ type: "render.result", id, error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -273,7 +286,7 @@ export function startConnection() {
   socket.onConnection = (up) => {
     set({ online: up });
     // This tab can render HTML, so the server may ask it to translate HTML UIs.
-    if (up) socket.send({ type: "hello", capabilities: ["convert.html"] });
+    if (up) socket.send({ type: "hello", capabilities: ["convert.html", "render.frames"] });
   };
   socket.connect();
 }

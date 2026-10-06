@@ -22,7 +22,7 @@ import { checkModel, describeIssues } from "../shared/diagnostics.ts";
 import { compactModel, compactUi, modelOutline, nodesUnder, partsInGroup } from "../shared/compact.ts";
 import { animationLength, AnimationEditSchema, AnimationSpecSchema, applyAnimationEdit, checkAnimation, RIGS, sanitizeAnimationSpec, unsupportedJoints } from "../shared/animation.ts";
 import { POSE_NAMES } from "../shared/poses.ts";
-import { applyVfxEdit, PARTICLE_PRESET_NAMES, VfxEditSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
+import { applyVfxEdit, isOneShot, oneShotLength, PARTICLE_PRESET_NAMES, VfxEditSchema, vfxSummary, TEXTURE_PRESETS } from "../shared/vfx.ts";
 import { scriptsToLuau } from "../shared/to-luau.ts";
 import { AbilityEditSchema, AbilitySpecInputSchema, applyAbilityEdit, ATTACH_POINTS, expandAbilityInput, sanitizeAbilitySpec } from "../shared/ability.ts";
 import { EFFECT_PRESET_NAMES, expandVfxInput, VfxInputSchema } from "../shared/vfx-presets.ts";
@@ -32,7 +32,7 @@ import {
   type EditOp, type TerrainOp,
 } from "../shared/studio-ops.ts";
 import { ID_PREFIX, sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
-import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
+import type { FramesRequest, FramesView, HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
 
@@ -52,7 +52,7 @@ interface ToolDef {
  * Tools that only read. Claude Code runs read-only tools of one reply in parallel instead of
  * one after another, so several lookups cost one wait.
  */
-const READ_ONLY = new Set(["list_assets", "get_asset", "studio_query", "studio_scripts", "studio_inspect", "studio_screenshot", "studio_console", "studio_state", "studio_audit"]);
+const READ_ONLY = new Set(["list_assets", "get_asset", "preview_frames", "studio_query", "studio_scripts", "studio_inspect", "studio_screenshot", "studio_console", "studio_state", "studio_audit"]);
 
 interface Ctx {
   convId: string;
@@ -64,6 +64,8 @@ export interface ForgeDeps {
   bridge: StudioBridge;
   getSettings: () => Settings;
   convertHtml: (request: HtmlConvertRequest) => Promise<{ spec: UiSpec; warnings: string[] }>;
+  /** A frame sheet (base64 PNG) drawn by an open Studio Forge tab. */
+  renderFrames?: (request: FramesRequest) => Promise<string>;
 }
 
 const text = (t: string, isError = false): ToolResult => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
@@ -574,6 +576,37 @@ export class ForgeMcp {
             return text(JSON.stringify(compactUi({ ...a.spec, nodes })) + note);
           }
           return text(JSON.stringify(a.spec));
+        },
+      },
+      {
+        name: "preview_frames",
+        description:
+          "Look at your work: draws an animation, effect or ability at several moments (or a model from four sides) with the live preview engine and returns one image, time on each frame, floor grid in studs. Check poses, timing, feet on the floor, where effects, summons and props go, then fix what looks wrong. Default views: animations front+side, abilities their own camera.",
+        schema: z.object({
+          id,
+          frames: z.number().int().min(2).max(12).optional().describe("evenly spaced over the whole length, default 6 (animations 5)"),
+          times: z.array(z.number().min(0).max(300)).min(1).max(12).optional().describe("exact seconds instead"),
+          view: z.enum(["front", "side", "behind", "top", "front+side"]).optional(),
+        }),
+        run: async ({ id: assetId, frames, times, view }) => {
+          if (!this.deps.renderFrames) return text("Frames can't be drawn here.", true);
+          const asset = assets.get(assetId);
+          if (!asset) return text(`No asset with id ${assetId}.`, true);
+          if (asset.kind === "ui" || asset.kind === "script") return text("UIs are previewed in the browser; frames are for models, animations, effects and abilities.", true);
+          let length = 0, data: unknown = asset.spec;
+          if (asset.kind === "animation") length = animationLength(asset.spec);
+          else if (asset.kind === "vfx") length = isOneShot(asset.spec) ? oneShotLength(asset.spec) : 2;
+          else if (asset.kind === "ability") {
+            const r = resolveStored(asset.spec);
+            data = r;
+            length = r.length;
+          }
+          const n = frames ?? (asset.kind === "animation" ? 5 : 6);
+          const at = times ?? Array.from({ length: n }, (_, i) => Math.round((n === 1 ? 0 : (i / (n - 1)) * length) * 100) / 100);
+          const v: FramesView = view ?? (asset.kind === "animation" ? "front+side" : "front");
+          const png = await this.deps.renderFrames({ kind: asset.kind, name: asset.name, data, times: at, view: v });
+          const what = asset.kind === "model" ? "from the front, back, side and top" : `at ${at.join(", ")} s (${v})`;
+          return { content: [{ type: "text", text: `${asset.kind} "${asset.name}" ${what}.` }, { type: "image", data: png, mimeType: "image/png" }] };
         },
       },
       {

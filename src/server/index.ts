@@ -9,6 +9,7 @@ import { StudioBridge, unquote } from "./studio-bridge.ts";
 import { ForgeMcp } from "./forge-mcp.ts";
 import { ClaudeManager } from "./claude.ts";
 import { HtmlBridge } from "./html-bridge.ts";
+import { RenderBridge } from "./render-bridge.ts";
 import { buildLuau, buildRbxmx, importAsset, pullSelection } from "./importer.ts";
 import { parsePath, PlaceReader } from "./place.ts";
 import { ModelSpecSchema, sanitizeModelSpec } from "../shared/model.ts";
@@ -28,7 +29,8 @@ const getSettings = () => settings;
 const bridge = new StudioBridge(getSettings);
 const place = new PlaceReader(bridge);
 const htmlBridge = new HtmlBridge();
-const forge = new ForgeMcp({ bridge, getSettings, convertHtml: (r) => htmlBridge.convert(r) });
+const renderBridge = new RenderBridge();
+const forge = new ForgeMcp({ bridge, getSettings, convertHtml: (r) => htmlBridge.convert(r), renderFrames: (r) => renderBridge.frames(r) });
 const claude = new ClaudeManager({ getSettings, forge, port: PORT, studioContext });
 // The selection and camera focus in Studio, sent with each message so "this" needs no lookup.
 async function studioContext(): Promise<string | null> {
@@ -459,6 +461,7 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clients.delete(ws);
     htmlBridge.forget(ws);
+    renderBridge.forget(ws);
   });
   ws.on("message", (raw) => {
     let msg: ClientEvent;
@@ -468,10 +471,13 @@ wss.on("connection", (ws) => {
       return;
     }
     htmlBridge.touch(ws);
+    renderBridge.touch(ws);
     try {
       if (msg.type === "hello") {
         if (msg.capabilities?.includes("convert.html")) htmlBridge.register(ws);
+        if (msg.capabilities?.includes("render.frames")) renderBridge.register(ws);
       } else if (msg.type === "convert.result") htmlBridge.settle(msg.id, msg);
+      else if (msg.type === "render.result") renderBridge.settle(msg.id, msg);
       else if (msg.type === "chat.send") claude.send(msg.convId, msg.text, msg.images);
       else if (msg.type === "chat.stop") claude.stop(msg.convId);
       else if (msg.type === "chat.warm") claude.warm(msg.convId);

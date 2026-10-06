@@ -229,7 +229,21 @@ export type ServerEvent =
   | { type: "permission.resolved"; id: string }
   | { type: "login"; line: string; done?: boolean }
   | { type: "toast"; level: "info" | "success" | "error"; message: string }
-  | { type: "convert.html"; id: string; request: HtmlConvertRequest };
+  | { type: "convert.html"; id: string; request: HtmlConvertRequest }
+  | { type: "render.frames"; id: string; request: FramesRequest };
+
+export type FramesView = "front" | "side" | "behind" | "top" | "front+side";
+
+/** Frames for Claude to look at, drawn by an open Studio Forge tab with the preview engine. */
+export interface FramesRequest {
+  kind: "animation" | "vfx" | "ability" | "model";
+  name: string;
+  /** The animation, effect or model spec, or the resolved ability. */
+  data: unknown;
+  /** Seconds (models: ignored, they are shown from several sides). */
+  times: number[];
+  view: FramesView;
+}
 
 export interface HtmlConvertRequest {
   name: string;
@@ -248,6 +262,8 @@ export type ClientEvent =
   | { type: "chat.unqueue"; convId: string; id: string }
   | { type: "permission.respond"; id: string; allow: boolean; always?: boolean }
   | { type: "convert.result"; id: string; spec?: unknown; warnings?: string[]; error?: string }
+  /** A frame sheet as base64 PNG (no data: prefix). */
+  | { type: "render.result"; id: string; image?: string; error?: string }
   | { type: "hello"; capabilities: string[] };
 
 export interface ImportResult {

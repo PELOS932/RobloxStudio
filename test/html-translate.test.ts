@@ -125,6 +125,31 @@ describe.skipIf(!CHROME)("HTML → Roblox UI translation (browser)", () => {
     expect(asset.spec.nodes.find((n: UiNode) => n.name === "LevelUpToast").text).toBe("⭐ Level 13 reached!");
   }, 90_000);
 
+  it("draws frames of animations, abilities and models for Claude to look at", async () => {
+    events.length = 0;
+    ws.send(JSON.stringify({ type: "chat.send", convId, text: "show me frames" }));
+    await waitFor("status", (e) => e.convId === convId && e.status === "idle" && events.some((x) => x.type === "message" && x.convId === convId && x.message.blocks.some((b) => b.type === "text" && b.text === "Done.")), 90_000);
+    const conv = await api(`/api/conversations/${convId}`);
+    const calls = conv.messages.at(-1).blocks.filter((b: { type: string; name?: string }) => b.type === "tool" && b.name === "mcp__forge__preview_frames");
+    expect(calls).toHaveLength(3);
+    const size = (url: string) => {
+      const png = Buffer.from(url.split(",")[1], "base64");
+      expect(png.subarray(1, 4).toString()).toBe("PNG");
+      return [png.readUInt32BE(16), png.readUInt32BE(20)];
+    };
+    const [anim, ability, model] = calls.map((c: { result: { text: string; images?: string[] } }) => c.result);
+    // 0.8 s of keyframes plus the follow-through of the hands (3 × 0.04 s).
+    expect(anim.text).toBe("animation \"Combo\" at 0, 0.23, 0.46, 0.69, 0.92 s (front+side).");
+    expect(size(anim.images![0])).toEqual([5 * 300, 2 * 300]); // five times, front and side
+    expect(ability.text).toMatch(/^ability "Shadow Guard" at 0, [\d.]+, [\d.]+, [\d.]+ s \(front\)\.$/);
+    expect(size(ability.images![0])).toEqual([4 * 300, 300]);
+    expect(model.text).toBe('model "Frame Lantern" from the front, back, side and top.');
+    expect(size(model.images![0])).toEqual([2 * 380, 2 * 300]);
+    if (process.env.FRAMES_OUT) {
+      [anim, ability, model].forEach((r, i) => writeFileSync(join(process.env.FRAMES_OUT!, `frames-${i}.png`), Buffer.from(r.images![0].split(",")[1], "base64")));
+    }
+  }, 120_000);
+
   it.skipIf(!lune)("produces Luau and .rbxmx that build identical instances", () => {
     const harness = join(ROOT, "test/lune/harness.luau");
     const dir = mkdtempSync(join(tmpdir(), "forge-html-lune-"));

@@ -97,7 +97,9 @@ async function toolCall(name, input, beforeRun) {
     return null;
   }
   const res = await client.callTool({ name, arguments: input });
-  out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolId, content: res.content, is_error: !!res.isError }] }, parent_tool_use_id: null });
+  // Like Claude Code: MCP images become API image blocks in the tool result.
+  const content = res.content.map((c) => (c.type === "image" ? { type: "image", source: { type: "base64", media_type: c.mimeType, data: c.data } } : c));
+  out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolId, content, is_error: !!res.isError }] }, parent_tool_use_id: null });
   return res;
 }
 
@@ -235,6 +237,24 @@ for await (const line of createInterface({ input: process.stdin })) {
       summons: [{ at: 0, animation: "caster", vfx: { preset: "magicAura", scale: 0.3 } }],
       props: [{ at: 0, attach: "leftHand", model: { styles: { gold: { color: "#e8c46a", material: "Metal" } }, parts: [{ name: "Ring", size: [1, 0.3, 1], pos: [0, 0, 0], style: "gold" }] } }],
     });
+    streamText("Done.");
+  } else if (/frames/i.test(prompt)) {
+    // Claude checks its work by looking at frames drawn by the preview engine.
+    const idOf = (res) => res.content[0].text.match(/\b([mvab]_[a-z0-9]{6})\b/)?.[1];
+    const anim = await toolCall("create_animation", {
+      name: "Combo", rig: "R15", loop: false, overlap: 0.04,
+      keyframes: [{ t: 0, pose: "guard" }, { t: 0.15, pose: "windup" }, { t: 0.3, pose: "punch" }, { t: 0.5, pose: "punch", mirror: true }, { t: 0.8, from: 0 }],
+    });
+    await toolCall("preview_frames", { id: idOf(anim) });
+    const ability = await toolCall("create_ability", {
+      name: "Shadow Guard", rig: "R15",
+      animation: { loop: false, keyframes: [{ t: 0, pose: "idle" }, { t: 0.3, pose: "point" }, { t: 1.2, pose: "point" }] },
+      summons: [{ at: 0.1, duration: 1, animation: "caster", color: "#4fd1ff" }],
+      props: [{ at: 0.2, duration: 0.9, attach: "ground", offset: [0, 0, -4], appear: "rise", model: { parts: [{ name: "Wall", size: [6, 4, 1], pos: [0, 2, 0], material: "Slate", color: "#5b5f6b" }] } }],
+    });
+    await toolCall("preview_frames", { id: idOf(ability), frames: 4 });
+    const model = await toolCall("create_model", { ...lantern, name: "Frame Lantern" });
+    await toolCall("preview_frames", { id: idOf(model) });
     streamText("Done.");
   } else if (/studio context/i.test(prompt)) {
     // Echo what Studio Forge added after the user's text (the live Studio context).

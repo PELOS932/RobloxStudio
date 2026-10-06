@@ -120,6 +120,7 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
       if (input.speed) bits.push(`×${input.speed}`);
       return { label: "Edit animation", args: bits.filter(Boolean).join(" ") };
     }
+    case "preview_frames": return { label: "Look at frames", args: [asset(field("id")), input.view].filter(Boolean).join(" · ") };
     case "list_assets": return { label: "List assets", args: "" };
     case "get_asset": return { label: "Read asset", args: asset(field("id")) };
     case "import_to_studio": return { label: "Import to Studio", args: [asset(field("id")), input.parent].filter(Boolean).join(" → ") };
