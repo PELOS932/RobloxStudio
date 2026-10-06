@@ -5,7 +5,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocketServer, type WebSocket } from "ws";
 import { detectRobloxContent, HOST, PORT, ROOT, loadSettings, saveSettings } from "./config.ts";
 import { assets, bus, conversations, games, shortId } from "./store.ts";
-import { StudioBridge } from "./studio-bridge.ts";
+import { StudioBridge, unquote } from "./studio-bridge.ts";
 import { ForgeMcp } from "./forge-mcp.ts";
 import { ClaudeManager } from "./claude.ts";
 import { HtmlBridge } from "./html-bridge.ts";
@@ -18,6 +18,7 @@ import { AnimationSpecSchema, sanitizeAnimationSpec } from "../shared/animation.
 import { sanitizeVfxSpec, VfxSpecSchema } from "../shared/vfx.ts";
 import { AbilitySpecSchema, sanitizeAbilitySpec } from "../shared/ability.ts";
 import { parseAutoCompact } from "../shared/context.ts";
+import { studioContextLuau } from "../shared/studio-ops.ts";
 import type { Asset } from "../shared/assets.ts";
 import type { BootState, ClientEvent, ServerEvent, Settings, StudioStatus } from "../shared/protocol.ts";
 
@@ -28,7 +29,14 @@ const bridge = new StudioBridge(getSettings);
 const place = new PlaceReader(bridge);
 const htmlBridge = new HtmlBridge();
 const forge = new ForgeMcp({ bridge, getSettings, convertHtml: (r) => htmlBridge.convert(r) });
-const claude = new ClaudeManager({ getSettings, forge, port: PORT });
+const claude = new ClaudeManager({ getSettings, forge, port: PORT, studioContext });
+// The selection and camera focus in Studio, sent with each message so "this" needs no lookup.
+async function studioContext(): Promise<string | null> {
+  const st = bridge.status;
+  if (!settings.studioContext || st.state !== "connected" || !st.studioId) return null;
+  const line = unquote(await bridge.runLuau(studioContextLuau())).trim();
+  return line.startsWith("place ") ? line.slice(0, 600) : null;
+}
 // Forge tools report live progress lines onto the running tool call in the chat.
 forge.progressSink = (convId, toolName, text) => claude.toolProgress(convId, toolName, text);
 
@@ -466,6 +474,7 @@ wss.on("connection", (ws) => {
       } else if (msg.type === "convert.result") htmlBridge.settle(msg.id, msg);
       else if (msg.type === "chat.send") claude.send(msg.convId, msg.text, msg.images);
       else if (msg.type === "chat.stop") claude.stop(msg.convId);
+      else if (msg.type === "chat.warm") claude.warm(msg.convId);
       else if (msg.type === "chat.compact") claude.compact(msg.convId, msg.instructions);
       else if (msg.type === "chat.unqueue") claude.unqueue(msg.convId, msg.id);
       else if (msg.type === "permission.respond") forge.resolvePermission(msg.id, msg.allow, msg.always);

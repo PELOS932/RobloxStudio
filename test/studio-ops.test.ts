@@ -3,7 +3,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { editLuau, lightingLuau, queryLuau, scriptSearchLuau, terrainLuau, toLua } from "../src/shared/studio-ops.ts";
+import {
+  auditLuau, editLuau, lightingLuau, parseScriptRead, queryLuau, scriptPatchLuau, scriptReadLuau, scriptSearchLuau, studioContextLuau, terrainLuau, toLua,
+} from "../src/shared/studio-ops.ts";
 import { scriptsToLuau } from "../src/shared/to-luau.ts";
 import { summarizeOutput } from "../src/server/forge-mcp.ts";
 
@@ -18,6 +20,13 @@ try {
 describe("studio power tools", () => {
   it("turns JSON into Luau tables (nulls survive as FORGE_NULL)", () => {
     expect(toLua({ a: [1, "x", true, null], "b-c": { d: 2.5 } })).toBe('{["a"]={1,"x",true,FORGE_NULL},["b-c"]={["d"]=2.5}}');
+  });
+
+  it("parses script read ranges", () => {
+    expect(parseScriptRead("ServerScriptService.Main")).toEqual({ path: "ServerScriptService.Main" });
+    expect(parseScriptRead("ServerScriptService.Main:10-40")).toEqual({ path: "ServerScriptService.Main", from: 10, to: 40 });
+    expect(parseScriptRead("A.B:12")).toEqual({ path: "A.B", from: 12, to: 12 });
+    expect(parseScriptRead("A.B:12-")).toEqual({ path: "A.B", from: 12 });
   });
 
   it("puts problems first when summarizing a play-test", () => {
@@ -91,6 +100,89 @@ describe.skipIf(!luneAvailable)("studio power tools in the mock Studio (Lune)", 
     const found = run(scriptSearchLuau({ pattern: "return", context: 0 }));
     expect(found).toBe("1 matches in 2 scripts\nReplicatedStorage.Util:1: return {}");
     expect(run(scriptSearchLuau({})).split("\n").sort()).toEqual(["2 scripts", "ReplicatedStorage.Util [ModuleScript] 1 lines", "ServerScriptService.Main [Script] 1 lines"].sort());
+  });
+
+  it("works on the selection: group, weld, scale, bounds, ungroup, and the live context line", () => {
+    run(editLuau([
+      { op: "create", class: "Folder", name: "Yard", parent: "Workspace", children: [
+        { class: "Part", name: "Base", props: { Size: [4, 1, 4], Position: [0, 0.5, 0] } },
+        { class: "Part", name: "Top", props: { Size: [2, 2, 2], Position: [0, 2, 0] } },
+      ] },
+      { op: "select", paths: ["Workspace.Yard.Base", "Workspace.Yard.Top"] },
+    ]));
+    expect(run(studioContextLuau())).toBe('place "DataModel" · selected Workspace.Yard.Base [Part] size 4,1,4 at 0,0.5,0; Workspace.Yard.Top [Part] size 2,2,2 at 0,2,0');
+    expect(run(queryLuau({ path: "@selection", props: ["Size"] })).split("\n")).toEqual(["2 matches", "Workspace.Yard.Base [Part] Size=4,1,4", "Workspace.Yard.Top [Part] Size=2,2,2"]);
+    expect(run(editLuau([{ op: "group", path: "@selection", name: "Stack" }, { op: "weld", path: "Workspace.Yard.Stack", unanchor: true }])).split("\n")).toEqual([
+      "ok · 4 instances changed (one undo step)",
+      "1 grouped 2 into Workspace.Yard.Stack",
+      "2 welded 1 parts to Workspace.Yard.Stack.Base (unanchored)",
+    ]);
+    expect(run(queryLuau({ path: "Workspace.Yard", depth: 1, props: ["Bounds", "Parts", "PrimaryPart"] }))).toBe("in Workspace.Yard: 1 match\nStack [Model] Bounds=4,3,4 at 0,1.5,0 Parts=2 PrimaryPart=Workspace.Yard.Stack.Base");
+    // The selection is the new group now; scale it about its pivot.
+    run(editLuau([{ op: "scale", path: "@selection", factor: 2 }]));
+    expect(run(queryLuau({ path: "Workspace.Yard.Stack", class: "BasePart", props: ["Size", "Position"] })).split("\n").slice(1)).toEqual([
+      "Base [Part] Size=8,2,8 Position=0,0.5,0",
+      "Top [Part] Size=4,4,4 Position=0,3.5,0",
+    ]);
+    expect(run(editLuau([{ op: "ungroup", path: "Workspace.Yard.Stack" }]))).toBe("ok · 2 instances changed (one undo step)\n1 ungrouped 2");
+    expect(run(editLuau([{ op: "delete", path: "Workspace.Nothing" }, { op: "group", query: { path: "Workspace.Yard", name: "zzz" } }])).split("\n").slice(1)).toEqual([
+      "1 FAILED delete: not found: Workspace.Nothing",
+      "2 FAILED group: nothing to group",
+    ]);
+  });
+
+  it("reads numbered script lines and patches several scripts in one call", () => {
+    run(scriptsToLuau([{ name: "Shop", kind: "Script", parent: "ServerScriptService", source: "local price = 10\nspawn(function()\n\twait(1)\n\tprint(price)\nend)\nreturn price" }]).code);
+    expect(run(scriptReadLuau([parseScriptRead("ServerScriptService.Shop:2-3"), parseScriptRead("Workspace")]))).toBe(
+      "== ServerScriptService.Shop [Script] lines 2-3 of 6\n2\tspawn(function()\n3\t\twait(1)\n== Workspace: Workspace is a Workspace, not a script",
+    );
+    const out = run(scriptPatchLuau([
+      { path: "ServerScriptService.Shop", edits: [{ old: "spawn(", new: "task.spawn(" }, { old: "\twait(1)", new: "\ttask.wait(1)" }, { old: "price", new: "cost", all: true }] },
+      { path: "ServerScriptService.Shop", edits: [{ old: "print(cost) ", new: "x" }] },
+      { path: "ServerScriptService.Shop", edits: [{ old: "cost", new: "x" }] },
+      { path: "ReplicatedStorage.Prices", source: "return { sword = 10 }", class: "ModuleScript" },
+    ]));
+    expect(out.split("\n")).toEqual([
+      "2 of 4 scripts failed (the others were saved)",
+      "1 ServerScriptService.Shop: 3 edits at line 2, 3, 1 (6 → 6 lines)",
+      "2 FAILED ServerScriptService.Shop: edit 1: old text not found (its first line is at line 4: check whitespace and the lines after it)",
+      "3 FAILED ServerScriptService.Shop: edit 1: old text is found 3 times; include more surrounding text or set all",
+      "4 ReplicatedStorage.Prices: created (1 → 1 lines)",
+    ]);
+    expect(run(scriptReadLuau([{ path: "ServerScriptService.Shop" }])).split("\n").slice(1)).toEqual([
+      "1\tlocal cost = 10", "2\ttask.spawn(function()", "3\t\ttask.wait(1)", "4\t\tprint(cost)", "5\tend)", "6\treturn cost",
+    ]);
+  });
+
+  it("audits the place for what will break or slow the game", () => {
+    run(editLuau([
+      { op: "create", class: "Folder", name: "Audit", parent: "Workspace", children: [
+        { class: "Part", name: "Falls", props: { Size: [1, 1, 1], Position: [0, 5, 0], Anchored: false } },
+        { class: "Part", name: "Held", props: { Size: [1, 1, 1], Position: [0, 6, 0], Anchored: false } },
+        { class: "Part", name: "Root", props: { Size: [1, 1, 1], Position: [0, 7, 0], Anchored: false }, children: [{ class: "WeldConstraint", name: "W" }] },
+        { class: "Part", name: "Wall", props: { Size: [1, 9, 9], Position: [9, 4.5, 0], Transparency: 1 } },
+        { class: "Part", name: "Wall2", props: { Size: [1, 9, 9], Position: [9, 4.5, 0], Transparency: 1 } },
+        { class: "Part", name: "Void", props: { Size: [1, 1, 1], Position: [0, -900, 0] } },
+        { class: "LocalScript", name: "Lost", props: { Source: "print('never runs')" } },
+      ] },
+      { op: "set", path: "Workspace.Audit.Root.W", props: { Part0: "@Workspace.Audit.Root", Part1: "@Workspace.Audit.Held" } },
+    ]));
+    expect(run(auditLuau("Workspace.Audit")).split("\n")).toEqual([
+      "Audit of Workspace.Audit: 6 parts in Workspace, 1 scripts, 0 shadow-casting lights, StreamingEnabled off.",
+      "Problems:",
+      "- unanchored parts with no joints (they fall at play: anchor or weld them) (1): Workspace.Audit.Falls",
+      "- parts below FallenPartsDestroyHeight (deleted at play) (1): Workspace.Audit.Void",
+      "- LocalScripts that never run there (use StarterPlayerScripts, StarterGui or StarterCharacterScripts) (1): Workspace.Audit.Lost",
+      "Warnings:",
+      "- invisible parts that still collide (2): Workspace.Audit.Wall, Workspace.Audit.Wall2",
+      "- duplicate parts in the same spot as another (flicker, wasted parts) (1): Workspace.Audit.Wall2",
+    ]);
+    run(scriptsToLuau([{ name: "Old", kind: "Script", parent: "ServerScriptService", source: "local p = game.Players.LocalPlayer\nwait(1)\nscript.Parent.Touched:connect(print)\n-- spawn(f) in a comment" }]).code);
+    const scripts = run(auditLuau("ServerScriptService")).split("\n");
+    expect(scripts).toContain("- server Scripts using LocalPlayer (it is nil on the server) (1): ServerScriptService.Old:1");
+    expect(scripts).toContain("- wait() is deprecated: use task.wait() (1): ServerScriptService.Old:2");
+    expect(scripts).toContain("- :connect() is deprecated: use :Connect() (1): ServerScriptService.Old:3");
+    expect(scripts.join("\n")).not.toMatch(/spawn\(\) is deprecated/);
   });
 
   it("applies a lighting preset with effects", () => {

@@ -266,3 +266,17 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
     new Promise<T>((_, reject) => (timer = setTimeout(() => reject(new StudioError(message)), ms))),
   ]);
 }
+
+/** execute_luau may hand back a returned string JSON-quoted; show it as plain text. */
+export function unquote(out: string): string {
+  const t = out.trim();
+  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+    try {
+      const v = JSON.parse(t);
+      if (typeof v === "string") return v;
+    } catch {
+      // Not JSON: keep as is.
+    }
+  }
+  return t;
+}

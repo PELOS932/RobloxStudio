@@ -28,7 +28,14 @@ local function fRound(n, d)
 	local r = math.round(n * m) / m
 	return if r == 0 then 0 else r
 end
+local function fSelection()
+	local ok, list = pcall(function() return game:GetService("Selection"):Get() end)
+	if not ok or #list == 0 then error("nothing is selected in Studio", 0) end
+	return list
+end
+-- "@selection" (or path "@selection") is the first selected instance.
 local function fPath(path)
+	if path == "@selection" then return fSelection()[1] end
 	local segs = {}
 	if type(path) == "table" then
 		segs = path
@@ -144,7 +151,7 @@ end
 -- Convert a JSON value to the type the property already has.
 local function fValue(current, v)
 	if v == FORGE_NULL then return nil end
-	if type(v) == "string" and string.sub(v, 1, 1) == "@" then return fPath(string.sub(v, 2)) end
+	if type(v) == "string" and string.sub(v, 1, 1) == "@" then return fPath(if v == "@selection" then v else string.sub(v, 2)) end
 	local t = typeof(current)
 	if t == "number" or t == "boolean" or t == "string" then return v
 	elseif t == "Vector3" then return Vector3.new(v[1], v[2], v[3])
@@ -182,7 +189,7 @@ end
 local function fGuess(v)
 	if v == FORGE_NULL then return nil end
 	if type(v) == "string" and string.match(v, "^#%x%x%x%x%x%x$") then return fColor(v) end
-	if type(v) == "string" and string.sub(v, 1, 1) == "@" then return fPath(string.sub(v, 2)) end
+	if type(v) == "string" and string.sub(v, 1, 1) == "@" then return fPath(if v == "@selection" then v else string.sub(v, 2)) end
 	if type(v) == "table" and #v == 3 and type(v[1]) == "number" then return Vector3.new(v[1], v[2], v[3]) end
 	return v
 end
@@ -264,31 +271,100 @@ local function fMatcher(q)
 		return true
 	end
 end
--- Calls fn on every match (up to limit); returns the number of matches.
+-- Calls fn on every match (up to limit); returns the number of matches. Path "@selection"
+-- searches the selected instances themselves and everything inside them.
 local function fFind(q, limit, fn)
-	local root = fPath(q.path or "Workspace")
 	local match = fMatcher(q)
 	local count = 0
-	if not q.depth then
-		for _, inst in root:GetDescendants() do
-			if match(inst) then
-				count += 1
-				if count <= limit then fn(inst, root) end
-			end
-		end
-	else
-		local function walk(node, depth)
-			for _, child in node:GetChildren() do
-				if match(child) then
-					count += 1
-					if count <= limit then fn(child, root) end
-				end
-				if depth < q.depth then walk(child, depth + 1) end
-			end
-		end
-		walk(root, 1)
+	local seen = {}
+	local function visit(inst, root)
+		if seen[inst] or not match(inst) then return end
+		seen[inst] = true
+		count += 1
+		if count <= limit then fn(inst, root) end
 	end
+	local function scan(root, nameRoot)
+		if not q.depth then
+			for _, inst in root:GetDescendants() do visit(inst, nameRoot) end
+		else
+			local function walk(node, depth)
+				for _, child in node:GetChildren() do
+					visit(child, nameRoot)
+					if depth < q.depth then walk(child, depth + 1) end
+				end
+			end
+			walk(root, 1)
+		end
+	end
+	if q.path == "@selection" then
+		for _, root in fSelection() do
+			visit(root, game)
+			scan(root, game)
+		end
+		return count, game
+	end
+	local root = fPath(q.path or "Workspace")
+	scan(root, root)
 	return count, root
+end
+-- Instances an op works on: path ("@selection" = everything selected), paths, or a query.
+local function fTargets(o)
+	if o.path == "@selection" then return fSelection() end
+	if o.path then return { fPath(o.path) } end
+	if o.paths then
+		local list = {}
+		for _, p in o.paths do
+			if p == "@selection" then
+				for _, inst in fSelection() do table.insert(list, inst) end
+			else
+				table.insert(list, fPath(p))
+			end
+		end
+		return list
+	end
+	if o.query then
+		local list = {}
+		fFind(o.query, 5000, function(inst) table.insert(list, inst) end)
+		return list
+	end
+	error("give path, paths or query", 0)
+end
+-- World-space box of a part or a model/folder (rotation-aware fallback where GetBoundingBox is missing).
+local function fBounds(inst)
+	if inst:IsA("BasePart") then return inst.CFrame, inst.Size end
+	local ok, cf, size = pcall(function() return inst:GetBoundingBox() end)
+	if ok and cf then return cf, size end
+	local lo, hi = nil, nil
+	for _, d in inst:GetDescendants() do
+		if d:IsA("BasePart") then
+			local c, h = d.CFrame, d.Size / 2
+			for _, sx in { -1, 1 } do
+				for _, sy in { -1, 1 } do
+					for _, sz in { -1, 1 } do
+						local p = c * Vector3.new(h.X * sx, h.Y * sy, h.Z * sz)
+						lo = if lo then Vector3.new(math.min(lo.X, p.X), math.min(lo.Y, p.Y), math.min(lo.Z, p.Z)) else p
+						hi = if hi then Vector3.new(math.max(hi.X, p.X), math.max(hi.Y, p.Y), math.max(hi.Z, p.Z)) else p
+					end
+				end
+			end
+		end
+	end
+	if not lo then return fPivot(inst), Vector3.new(0, 0, 0) end
+	return CFrame.new((lo + hi) / 2), hi - lo
+end
+local fEditor = nil
+pcall(function() fEditor = game:GetService("ScriptEditorService") end)
+-- A script's source as the editor has it (unsaved edits included).
+local function fSource(s)
+	if fEditor then
+		local ok, src = pcall(function() return fEditor:GetEditorSource(s) end)
+		if ok and type(src) == "string" then return src end
+	end
+	return s.Source
+end
+local function fLineCount(src)
+	local _, n = string.gsub(src, "\n", "")
+	return n + 1
 end
 local function fCounts(list)
 	local counts, order = {}, {}
@@ -395,9 +471,21 @@ export function queryLuau(q: QueryInput): string {
 				end
 				if p == "Children" then return #inst:GetChildren() end
 				if p == "Position" and inst:IsA("BasePart") then return inst.CFrame.Position end
+				if p == "Bounds" then
+					local cf, size = fBounds(inst)
+					return { raw = fFmt(size) .. " at " .. fFmt(cf.Position) }
+				end
+				if p == "Parts" then
+					local n = if inst:IsA("BasePart") then 1 else 0
+					for _, d in inst:GetDescendants() do
+						if d:IsA("BasePart") then n += 1 end
+					end
+					return n
+				end
+				if p == "Lines" then return fLineCount(fSource(inst)) end
 				return inst[p]
 			end)
-			if ok and v ~= "" then line ..= " " .. p .. "=" .. fFmt(v) end
+			if ok and v ~= "" then line ..= " " .. p .. "=" .. (if type(v) == "table" and v.raw then v.raw else fFmt(v)) end
 		end
 		table.insert(lines, line)
 	end)
@@ -416,7 +504,13 @@ export type EditOp =
   | { op: "delete"; path?: string; query?: QueryInput }
   | { op: "clone"; path: string; parent?: string; name?: string; count?: number; offset?: number[] }
   | { op: "move"; path?: string; query?: QueryInput; by?: number[]; rotate?: number[]; to?: unknown; parent?: string }
-  | { op: "select"; paths: string[] };
+  | { op: "select"; paths?: string[]; path?: string; query?: QueryInput }
+  | { op: "group"; path?: string; paths?: string[]; query?: QueryInput; name?: string; parent?: string; class?: "Model" | "Folder" }
+  | { op: "ungroup"; path?: string; paths?: string[]; query?: QueryInput }
+  | { op: "weld"; path?: string; paths?: string[]; query?: QueryInput; to?: string; unanchor?: boolean }
+  | { op: "scale"; path?: string; paths?: string[]; query?: QueryInput; factor: number }
+  | { op: "focus"; path?: string }
+  | { op: "insert"; assetId: number | string; parent?: string; at?: number[] };
 
 export interface CreateSpec {
   class: string;
@@ -429,17 +523,10 @@ export function editLuau(ops: EditOp[]): string {
   return chunk(`
 	local OPS = ${toLua(ops)}
 	local report = {}
-	local selected = {}
+	-- What ends up selected: a select op's targets, else everything created or changed.
+	local selected, explicit = {}, nil
 	local changed, failed = 0, 0
-	local function targets(o)
-		if o.path then return { fPath(o.path) } end
-		if o.query then
-			local list = {}
-			fFind(o.query, 5000, function(inst) table.insert(list, inst) end)
-			return list
-		end
-		error("give path or query", 0)
-	end
+	local targets = fTargets
 	local function create(spec, parent)
 		local inst = Instance.new(spec.class)
 		if spec.name then inst.Name = spec.name end
@@ -508,8 +595,142 @@ export function editLuau(ops: EditOp[]): string {
 				changed += #list
 				table.insert(report, i .. " moved " .. #list)
 			elseif o.op == "select" then
-				for _, p in o.paths do table.insert(selected, fPath(p)) end
-				table.insert(report, i .. " selected " .. #o.paths)
+				local list = targets(o)
+				explicit = explicit or {}
+				for _, inst in list do table.insert(explicit, inst) end
+				table.insert(report, i .. " selected " .. #list)
+			elseif o.op == "group" then
+				local list = targets(o)
+				if #list == 0 then error("nothing to group", 0) end
+				local g = Instance.new(o.class or "Model")
+				g.Name = o.name or "Group"
+				g.Parent = if o.parent then fPath(o.parent) else list[1].Parent
+				for _, inst in list do inst.Parent = g end
+				changed += #list + 1
+				table.insert(selected, g)
+				table.insert(report, i .. " grouped " .. #list .. " into " .. g:GetFullName())
+			elseif o.op == "ungroup" then
+				local n = 0
+				for _, g in targets(o) do
+					for _, child in g:GetChildren() do
+						child.Parent = g.Parent
+						table.insert(selected, child)
+						n += 1
+					end
+					g.Parent = nil
+				end
+				changed += n
+				table.insert(report, i .. " ungrouped " .. n)
+			elseif o.op == "weld" then
+				-- Weld every part of each target to one root part, so it moves as one body.
+				local made, roots = 0, {}
+				for _, inst in targets(o) do
+					local parts = {}
+					if inst:IsA("BasePart") then table.insert(parts, inst) end
+					for _, d in inst:GetDescendants() do
+						if d:IsA("BasePart") then table.insert(parts, d) end
+					end
+					if #parts == 0 then continue end
+					local root = if o.to then fPath(o.to) else nil
+					if not root and inst:IsA("Model") then root = inst.PrimaryPart end
+					if not root then
+						root = parts[1]
+						for _, p in parts do
+							if p.Size.X * p.Size.Y * p.Size.Z > root.Size.X * root.Size.Y * root.Size.Z then root = p end
+						end
+					end
+					for _, p in parts do
+						if p ~= root then
+							local existing = p:FindFirstChild("ForgeWeld")
+							if not (existing and existing.Part0 == root) then
+								local w = Instance.new("WeldConstraint")
+								w.Name = "ForgeWeld"
+								w.Part0 = root
+								w.Part1 = p
+								w.Parent = p
+								made += 1
+							end
+						end
+						if o.unanchor then p.Anchored = false end
+					end
+					if inst:IsA("Model") and not inst.PrimaryPart and root:IsDescendantOf(inst) then inst.PrimaryPart = root end
+					table.insert(roots, root:GetFullName())
+				end
+				changed += made
+				table.insert(report, i .. " welded " .. made .. " parts to " .. (if #roots > 0 then table.concat(roots, ", ", 1, math.min(3, #roots)) else "nothing") .. (if o.unanchor then " (unanchored)" else ""))
+			elseif o.op == "scale" then
+				local f = o.factor
+				if type(f) ~= "number" or f <= 0 then error("factor must be a positive number", 0) end
+				local list = targets(o)
+				for _, inst in list do
+					local done = inst:IsA("Model") and pcall(function() inst:ScaleTo(inst:GetScale() * f) end)
+					if not done then
+						-- Scale parts (and meshes, attachments) about the pivot.
+						local pivot = fPivot(inst)
+						local all = inst:GetDescendants()
+						table.insert(all, inst)
+						for _, d in all do
+							if d:IsA("BasePart") then
+								local rel = pivot:ToObjectSpace(d.CFrame)
+								d.Size *= f
+								d.CFrame = pivot * (rel - rel.Position + rel.Position * f)
+							elseif d:IsA("SpecialMesh") then
+								d.Scale *= f
+							elseif d:IsA("Attachment") then
+								d.CFrame = d.CFrame - d.CFrame.Position + d.CFrame.Position * f
+							end
+						end
+					end
+				end
+				changed += #list
+				table.insert(report, i .. " scaled " .. #list .. " by " .. f)
+			elseif o.op == "focus" then
+				local inst = fPath(o.path or "@selection")
+				local cf, size = fBounds(inst)
+				local cam = workspace.CurrentCamera
+				local dist = math.max(size.Magnitude * 1.1, 8)
+				local center = cf.Position
+				cam.CFrame = CFrame.lookAt(center - cam.CFrame.LookVector * dist, center)
+				pcall(function() cam.Focus = CFrame.new(center) end)
+				table.insert(selected, inst)
+				table.insert(report, i .. " camera on " .. inst:GetFullName())
+			elseif o.op == "insert" then
+				-- A model from the Creator Store / your inventory by asset id.
+				local idText = string.match(tostring(o.assetId or ""), "%d+")
+				if not idText then error("give assetId", 0) end
+				local okGet, objects = pcall(function() return game:GetObjects("rbxassetid://" .. idText) end)
+				if not okGet or #objects == 0 then
+					local model = game:GetService("InsertService"):LoadAsset(tonumber(idText))
+					objects = model:GetChildren()
+				end
+				local parent = fPath(o.parent or "Workspace")
+				-- Placed on the ground at "at", or where the camera looks.
+				local at = if o.at then Vector3.new(o.at[1], o.at[2], o.at[3]) else nil
+				if not at then
+					pcall(function()
+						local cam = workspace.CurrentCamera.CFrame
+						local hit = workspace:Raycast(cam.Position, cam.LookVector * 1000)
+						at = if hit then hit.Position else cam.Position + cam.LookVector * 30
+					end)
+				end
+				local scriptCount, names = 0, {}
+				for _, obj in objects do
+					obj.Parent = parent
+					if at and (obj:IsA("PVInstance")) then
+						local okB, cf, size = pcall(fBounds, obj)
+						if okB then
+							local bottom = cf.Position - Vector3.new(0, size.Y / 2, 0)
+							fPivotTo(obj, fPivot(obj) + (at - bottom))
+						end
+					end
+					for _, d in obj:GetDescendants() do
+						if d:IsA("LuaSourceContainer") then scriptCount += 1 end
+					end
+					table.insert(selected, obj)
+					table.insert(names, obj:GetFullName())
+				end
+				changed += #objects
+				table.insert(report, i .. " inserted " .. table.concat(names, ", ") .. (if scriptCount > 0 then " (contains " .. scriptCount .. " scripts: check them before play-testing)" else ""))
 			else
 				error("unknown op " .. tostring(o.op), 0)
 			end
@@ -519,8 +740,8 @@ export function editLuau(ops: EditOp[]): string {
 			table.insert(report, i .. " FAILED " .. o.op .. ": " .. tostring(err))
 		end
 	end
-	if #selected > 0 then
-		pcall(function() game:GetService("Selection"):Set(selected) end)
+	if explicit or #selected > 0 then
+		pcall(function() game:GetService("Selection"):Set(explicit or selected) end)
 	end
 	return (if failed > 0 then failed .. " of " .. #OPS .. " ops failed" else "ok") .. " · " .. changed .. " instances changed (one undo step)\\n" .. table.concat(report, "\\n")`, "Forge: edit");
 }
@@ -543,24 +764,17 @@ export function scriptSearchLuau(q: ScriptSearchInput): string {
 	local pattern = ${toLua(q.pattern ?? "")}
 	local plain = ${!q.regex}
 	local ctx = ${Math.min(3, q.context ?? 0)}
-	local editor = nil
-	pcall(function() editor = game:GetService("ScriptEditorService") end)
 	local lines, scripts, hits = {}, 0, 0
 	local list = root:GetDescendants()
 	if root:IsA("LuaSourceContainer") then list = { root } end
 	for _, s in list do
 		if not s:IsA("LuaSourceContainer") then continue end
-		local okSrc, src = pcall(function()
-			if editor then return editor:GetEditorSource(s) end
-			return s.Source
-		end)
-		if not okSrc then src = s.Source end
+		local src = fSource(s)
 		scripts += 1
 		local name = s:GetFullName()
 		if pattern == "" then
 			if scripts <= ${limit} then
-				local n = select(2, string.gsub(src, "\\n", "\\n")) + 1
-				table.insert(lines, name .. " [" .. s.ClassName .. "] " .. n .. " lines" .. (if s:IsA("BaseScript") and pcall(function() return s.Enabled end) and not s.Enabled then " (disabled)" else ""))
+				table.insert(lines, name .. " [" .. s.ClassName .. "] " .. fLineCount(src) .. " lines" .. (if s:IsA("BaseScript") and pcall(function() return s.Enabled end) and not s.Enabled then " (disabled)" else ""))
 			end
 		else
 			local all = string.split(src, "\\n")
@@ -585,6 +799,296 @@ export function scriptSearchLuau(q: ScriptSearchInput): string {
 	end
 	if hits == 0 then return "no matches in " .. scripts .. " scripts" end
 	return hits .. " matches in " .. scripts .. " scripts" .. (if hits > ${limit} then " (first ${limit})" else "") .. "\\n" .. table.concat(lines, "\\n")`);
+}
+
+// ---------------------------------------------------------------------------
+// studio_scripts read: numbered lines of one or more scripts (or line ranges)
+
+export interface ScriptRead {
+  path: string;
+  from?: number;
+  to?: number;
+}
+
+/** "ServerScriptService.Main" or "ServerScriptService.Main:10-40" (also ":10" and ":10-"). */
+export function parseScriptRead(entry: string): ScriptRead {
+  const m = entry.trim().match(/^(.*?)(?::(\d+)(?:-(\d*))?)?$/)!;
+  const from = m[2] ? Number(m[2]) : undefined;
+  const to = m[3] ? Number(m[3]) : m[2] && m[3] === undefined ? from : undefined;
+  return { path: m[1], ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) };
+}
+
+export function scriptReadLuau(reads: ScriptRead[], maxLines = 1500): string {
+  return chunk(`
+	local READS = ${toLua(reads)}
+	local out = {}
+	local budget = ${maxLines}
+	for _, r in READS do
+		local ok, err = pcall(function()
+			local s = fPath(r.path)
+			if not s:IsA("LuaSourceContainer") then error(s:GetFullName() .. " is a " .. s.ClassName .. ", not a script", 0) end
+			local all = string.split(fSource(s), "\\n")
+			local from = math.clamp(r.from or 1, 1, #all)
+			local want = math.min(#all, r.to or #all)
+			local to = math.min(want, from + budget - 1)
+			table.insert(out, "== " .. s:GetFullName() .. " [" .. s.ClassName .. "] lines " .. from .. "-" .. to .. " of " .. #all)
+			for i = from, to do table.insert(out, i .. "\\t" .. all[i]) end
+			budget -= to - from + 1
+			if to < want then table.insert(out, "… stopped at line " .. to .. ": read " .. s:GetFullName() .. ":" .. (to + 1) .. "-" .. want .. " for more") end
+		end)
+		if not ok then table.insert(out, "== " .. tostring(r.path) .. ": " .. tostring(err)) end
+	end
+	return table.concat(out, "\\n")`);
+}
+
+// ---------------------------------------------------------------------------
+// studio_script_patch: exact find/replace edits (or a full new source) for several scripts
+
+export interface ScriptPatch {
+  path: string;
+  edits?: { old: string; new: string; all?: boolean }[];
+  source?: string;
+  class?: "Script" | "LocalScript" | "ModuleScript";
+}
+
+export function scriptPatchLuau(patches: ScriptPatch[]): string {
+  return chunk(`
+	local PATCHES = ${toLua(patches)}
+	local report, failed = {}, 0
+	local function lineAt(src, pos)
+		local _, n = string.gsub(string.sub(src, 1, pos - 1), "\\n", "")
+		return n + 1
+	end
+	local function write(s, src)
+		local ok = fEditor ~= nil and pcall(function()
+			fEditor:UpdateSourceAsync(s, function() return src end)
+		end)
+		if not ok then s.Source = src end
+	end
+	for i, p in PATCHES do
+		local ok, err = pcall(function()
+			local found, s = pcall(fPath, p.path)
+			local created = false
+			if not found then
+				if not p.source then error(s, 0) end
+				local parentPath, name = string.match(p.path, "^(.*)%.([^%.]+)$")
+				if not parentPath then error("give the full path, e.g. ServerScriptService.Main", 0) end
+				s = Instance.new(p.class or "Script")
+				s.Name = name
+				s.Parent = fPath(parentPath)
+				created = true
+			end
+			if not s:IsA("LuaSourceContainer") then error(s:GetFullName() .. " is a " .. s.ClassName .. ", not a script", 0) end
+			local src = fSource(s)
+			local new = if p.source then p.source else src
+			local at = {}
+			for j, e in p.edits or {} do
+				if e.old == "" then error("edit " .. j .. ": old is empty", 0) end
+				local hits, pos = {}, 1
+				while true do
+					local a, b = string.find(new, e.old, pos, true)
+					if not a then break end
+					table.insert(hits, a)
+					pos = b + 1
+				end
+				if #hits == 0 then
+					local first = string.match(e.old, "^%s*([^\\n]-)%s*\\n") or string.match(e.old, "^%s*(.-)%s*$")
+					local hint = ""
+					if first and #first > 3 then
+						local a = string.find(new, first, 1, true)
+						if a then hint = " (its first line is at line " .. lineAt(new, a) .. ": check whitespace and the lines after it)" end
+					end
+					error("edit " .. j .. ": old text not found" .. hint, 0)
+				end
+				if #hits > 1 and not e.all then error("edit " .. j .. ": old text is found " .. #hits .. " times; include more surrounding text or set all", 0) end
+				table.insert(at, lineAt(new, hits[1]))
+				local parts, last = {}, 1
+				for _, a in hits do
+					table.insert(parts, string.sub(new, last, a - 1))
+					table.insert(parts, e.new)
+					last = a + #e.old
+				end
+				table.insert(parts, string.sub(new, last))
+				new = table.concat(parts)
+			end
+			if new == src and not created then
+				table.insert(report, i .. " " .. s:GetFullName() .. ": unchanged")
+				return
+			end
+			write(s, new)
+			local what = if created then "created" elseif p.source then "replaced" else #(p.edits or {}) .. " edit" .. (if #(p.edits or {}) == 1 then "" else "s") .. " at line " .. table.concat(at, ", ")
+			table.insert(report, i .. " " .. s:GetFullName() .. ": " .. what .. " (" .. fLineCount(src) .. " → " .. fLineCount(new) .. " lines)")
+		end)
+		if not ok then
+			failed += 1
+			table.insert(report, i .. " FAILED " .. tostring(p.path) .. ": " .. tostring(err))
+		end
+	end
+	return (if failed > 0 then failed .. " of " .. #PATCHES .. " scripts failed (the others were saved)" else "ok") .. "\\n" .. table.concat(report, "\\n")`, "Forge: script edit");
+}
+
+// ---------------------------------------------------------------------------
+// studio_audit: what will break or slow the game, in one pass over the place
+
+/** Deprecated or risky script patterns: [Lua pattern, what to say]. */
+const SCRIPT_SMELLS: [string, string][] = [
+  ["[^%.:%w_]wait%(", "wait() is deprecated: use task.wait()"],
+  ["[^%.:%w_]spawn%(", "spawn() is deprecated: use task.spawn()"],
+  ["[^%.:%w_]delay%(", "delay() is deprecated: use task.delay()"],
+  [":connect%(", ":connect() is deprecated: use :Connect()"],
+  [":remove%(%)", ":remove() is deprecated: use :Destroy()"],
+  ["Instance%.new%(%s*[\"'][%w_]+[\"']%s*,", "Instance.new(class, parent) is slow: set Parent last"],
+  ["Body[GVPAFT]%w*[\"']", "BodyMovers (BodyVelocity, BodyGyro…) are deprecated: use LinearVelocity / AlignOrientation / VectorForce"],
+  ["%.Velocity%s*=", "part.Velocity is deprecated: use AssemblyLinearVelocity"],
+];
+
+export function auditLuau(path = "game"): string {
+  return chunk(`
+	local root = fPath(${toLua(path)})
+	local ws = workspace
+	local SMELLS = ${toLua(SCRIPT_SMELLS)}
+	local fallHeight = -500
+	pcall(function() fallHeight = ws.FallenPartsDestroyHeight end)
+	local groups = {}
+	local function add(key, inst, extra)
+		local g = groups[key]
+		if not g then
+			g = { n = 0, list = {} }
+			groups[key] = g
+		end
+		g.n += 1
+		if #g.list < 4 then table.insert(g.list, inst:GetFullName() .. (extra or "")) end
+	end
+	local function inCharacter(inst)
+		local m = inst:FindFirstAncestorWhichIsA("Model")
+		while m do
+			if m:FindFirstChildWhichIsA("Humanoid") then return true end
+			m = m:FindFirstAncestorWhichIsA("Model")
+		end
+		return false
+	end
+	-- Parts held by a weld, joint or constraint anywhere (checked after the pass; GetJoints when it exists).
+	local jointed, loose = {}, {}
+	local function holds(j)
+		for _, k in { "Part0", "Part1" } do
+			local ok, part = pcall(function() return j[k] end)
+			if ok and part then jointed[part] = true end
+		end
+		for _, k in { "Attachment0", "Attachment1" } do
+			local ok, a = pcall(function() return j[k] end)
+			if ok and a and a.Parent then jointed[a.Parent] = true end
+		end
+	end
+	local sss = game:GetService("ServerScriptService")
+	local sps = nil
+	pcall(function() sps = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts") end)
+	local parts, scripts, shadowLights, spawns = 0, 0, 0, 0
+	local heavy, spots = {}, {}
+	for _, d in root:GetDescendants() do
+		if d:IsA("BasePart") then
+			if d:IsDescendantOf(ws) then
+				parts += 1
+				local top = d
+				while top.Parent and top.Parent ~= ws do top = top.Parent end
+				if top ~= d then heavy[top] = (heavy[top] or 0) + 1 end
+				if d:IsA("SpawnLocation") then spawns += 1 end
+				pcall(function()
+					local cf = d.CFrame
+					if not d.Anchored then table.insert(loose, d) end
+					if cf.Position.Y < fallHeight then add("fallen", d) end
+					-- The same part twice in one spot: wasted and flickering (z-fighting).
+					local p, sz = cf.Position, d.Size
+					local key = d.ClassName .. string.format("%.2f,%.2f,%.2f|%.2f,%.2f,%.2f", p.X, p.Y, p.Z, sz.X, sz.Y, sz.Z)
+					if spots[key] then add("dupe", d) else spots[key] = true end
+					if d.Transparency >= 1 and d.CanCollide and not d:IsA("SpawnLocation") and d.Name ~= "HumanoidRootPart" then add("ghost", d) end
+				end)
+			end
+		elseif d:IsA("JointInstance") or d:IsA("WeldConstraint") or d:IsA("Constraint") then
+			holds(d)
+		elseif d:IsA("Light") then
+			pcall(function()
+				if d.Shadows and d.Enabled then shadowLights += 1 end
+			end)
+		elseif d:IsA("LuaSourceContainer") then
+			scripts += 1
+			local okSrc, src = pcall(fSource, d)
+			if not okSrc then src = "" end
+			local runContext = "Legacy"
+			pcall(function() runContext = d.RunContext.Name end)
+			if d:IsA("LocalScript") then
+				if d:IsDescendantOf(sss) or (d:IsDescendantOf(ws) and not d:FindFirstAncestorWhichIsA("Tool") and not inCharacter(d)) then add("deadLocal", d) end
+			elseif d:IsA("Script") and runContext == "Legacy" then
+				if sps and d:IsDescendantOf(sps) then add("deadServer", d) end
+				local a = string.find(src, "LocalPlayer", 1, true)
+				if a then
+					local _, n = string.gsub(string.sub(src, 1, a), "\\n", "")
+					add("serverLocalPlayer", d, ":" .. (n + 1))
+				end
+			end
+			if src ~= "" then
+				local lines = string.split(src, "\\n")
+				for _, smell in SMELLS do
+					for ln, line in lines do
+						local code = string.gsub(line, "%-%-.*$", "")
+						if string.find(" " .. code, smell[1]) then
+							add("smell:" .. smell[2], d, ":" .. ln)
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+	for _, part in loose do
+		if not jointed[part] then
+			local ok, joints = pcall(function() return part:GetJoints() end)
+			if not (ok and #joints > 0) and not inCharacter(part) then add("loose", part) end
+		end
+	end
+	local out = {}
+	local streaming = "?"
+	pcall(function() streaming = if ws.StreamingEnabled then "on" else "off" end)
+	table.insert(out, "Audit of " .. (if root == game then "the place" else root:GetFullName()) .. ": " .. parts .. " parts in Workspace, " .. scripts .. " scripts, " .. shadowLights .. " shadow-casting lights, StreamingEnabled " .. streaming .. ".")
+	local function section(title, rows)
+		if #rows == 0 then return end
+		table.insert(out, title)
+		for _, r in rows do table.insert(out, "- " .. r) end
+	end
+	local function row(key, text)
+		local g = groups[key]
+		if not g then return nil end
+		return text .. " (" .. g.n .. "): " .. table.concat(g.list, ", ") .. (if g.n > #g.list then ", …" else "")
+	end
+	local problems, warnings = {}, {}
+	local function push(list, r) if r then table.insert(list, r) end end
+	push(problems, row("loose", "unanchored parts with no joints (they fall at play: anchor or weld them)"))
+	push(problems, row("fallen", "parts below FallenPartsDestroyHeight (deleted at play)"))
+	push(problems, row("deadLocal", "LocalScripts that never run there (use StarterPlayerScripts, StarterGui or StarterCharacterScripts)"))
+	push(problems, row("deadServer", "server Scripts in StarterPlayerScripts that never run (use a LocalScript)"))
+	push(problems, row("serverLocalPlayer", "server Scripts using LocalPlayer (it is nil on the server)"))
+	if root == game and spawns == 0 then table.insert(warnings, "no SpawnLocation: players spawn at the origin") end
+	push(warnings, row("ghost", "invisible parts that still collide"))
+	push(warnings, row("dupe", "duplicate parts in the same spot as another (flicker, wasted parts)"))
+	if shadowLights > 40 then table.insert(warnings, shadowLights .. " lights cast shadows: turn Shadows off on small or decorative lights") end
+	if streaming == "off" and parts > 20000 then table.insert(warnings, "big map with StreamingEnabled off: turn it on for faster joins and less memory") end
+	local smellKeys = {}
+	for key in groups do
+		if string.sub(key, 1, 6) == "smell:" then table.insert(smellKeys, key) end
+	end
+	table.sort(smellKeys)
+	for _, key in smellKeys do push(warnings, row(key, string.sub(key, 7))) end
+	local tops = {}
+	for inst, n in heavy do table.insert(tops, { inst = inst, n = n }) end
+	table.sort(tops, function(a, b) return a.n > b.n end)
+	local heavyRows = {}
+	for k = 1, math.min(3, #tops) do
+		if tops[k].n >= 300 then table.insert(heavyRows, tops[k].inst:GetFullName() .. " " .. tops[k].n .. " parts") end
+	end
+	if #heavyRows > 0 then table.insert(warnings, "heaviest: " .. table.concat(heavyRows, "; ")) end
+	section("Problems:", problems)
+	section("Warnings:", warnings)
+	if #problems == 0 and #warnings == 0 then table.insert(out, "No problems found.") end
+	return table.concat(out, "\\n")`);
 }
 
 // ---------------------------------------------------------------------------
@@ -818,4 +1322,60 @@ for _ = 1, ${Math.max(1, Math.min(20, Math.round(steps)))} do
 end
 return "${redo ? "Redid" : "Undid"} " .. done .. " step" .. (if done == 1 then "" else "s")
 `;
+}
+
+// ---------------------------------------------------------------------------
+// Live context sent along with chat messages: what is selected and what the camera looks at.
+// Kept tiny (it runs before every message) and never fails: each part is optional.
+
+export function studioContextLuau(): string {
+  return String.raw`local function r(n)
+	local x = math.round(n * 10) / 10
+	return if x == 0 then "0" else tostring(x)
+end
+local function v3(v) return r(v.X) .. "," .. r(v.Y) .. "," .. r(v.Z) end
+local out = {}
+pcall(function()
+	local sel = game:GetService("Selection"):Get()
+	if #sel == 0 then
+		table.insert(out, "nothing selected")
+		return
+	end
+	local items = {}
+	for i, inst in sel do
+		if i > 4 then
+			table.insert(items, "+" .. (#sel - 4) .. " more")
+			break
+		end
+		local s = inst:GetFullName() .. " [" .. inst.ClassName .. "]"
+		pcall(function()
+			if inst:IsA("BasePart") then
+				s ..= " size " .. v3(inst.Size) .. " at " .. v3(inst.CFrame.Position)
+			elseif inst:IsA("LuaSourceContainer") then
+				local _, n = string.gsub(inst.Source, "\n", "")
+				s ..= " " .. (n + 1) .. " lines"
+			elseif #inst:GetChildren() > 0 then
+				local n = 0
+				for _, d in inst:GetDescendants() do
+					if d:IsA("BasePart") then n += 1 end
+				end
+				s ..= if n > 0 then " " .. n .. " parts" else " " .. #inst:GetDescendants() .. " inside"
+				if n > 0 and inst:IsA("Model") then
+					local cf, size = inst:GetBoundingBox()
+					s ..= " size " .. v3(size) .. " at " .. v3(cf.Position)
+				end
+			end
+		end)
+		table.insert(items, s)
+	end
+	table.insert(out, "selected " .. table.concat(items, "; "))
+end)
+pcall(function()
+	local cf = workspace.CurrentCamera.CFrame
+	local s = "camera at " .. v3(cf.Position)
+	local hit = workspace:Raycast(cf.Position, cf.LookVector * 2000)
+	if hit then s ..= " looking at " .. hit.Instance:GetFullName() .. " (" .. v3(hit.Position) .. ")" end
+	table.insert(out, s)
+end)
+return "place " .. string.format("%q", game.Name) .. " · " .. table.concat(out, " · ")`;
 }

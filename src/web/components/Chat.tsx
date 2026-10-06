@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type React
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  CLI_OUTDATED, compactConversation, deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage,
+  CLI_OUTDATED, compactConversation, deleteConversation, exportConversation, importAsset, openAsset, renameConversation, sendMessage, startNewChat, stopConversation, toast, unqueueMessage, warmConversation,
   updateClaudeCode, updateSettings, useStore,
 } from "../store.ts";
 import { Icon, type IconName } from "../lib/icons.tsx";
@@ -983,7 +983,11 @@ function Composer({ convId, running, dropped, lastUserText, children }: {
           rows={1}
           value={text}
           placeholder={running ? "Claude is working. Messages you send now run next." : "Ask for a model, UI, animation, effect or script"}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            // Start Claude Code while the message is being typed: the reply comes about a second sooner.
+            if (convId && !running && e.target.value.trim()) warmConversation(convId);
+          }}
           onPaste={(e) => {
             if (e.clipboardData.files.length) {
               e.preventDefault();

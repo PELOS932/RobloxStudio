@@ -39,6 +39,8 @@ export interface ClaudeDeps {
   port: number;
   /** Claude Code reported subscription usage (rate_limit_event). */
   onLimits?: (info: unknown) => void;
+  /** A compact line about the open Studio place (selection, view), sent along with messages. */
+  studioContext?: () => Promise<string | null>;
 }
 
 const toMs = (v: unknown) => (typeof v === "number" && v > 0 ? (v < 1e12 ? v * 1000 : v) : undefined);
@@ -234,13 +236,45 @@ class ClaudeSession {
     for (const img of p.images ?? []) {
       content.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } });
     }
-    this.deliver(content);
+    // The Studio selection and view ride along (when they changed), so "this" needs no lookup
+    // call. It is read while Claude Code starts, so it costs no extra wait.
+    if (!this.ensureProc()) return;
+    if (this.status === "idle") this.setStatus("running");
+    void this.withStudioContext(content).then((c) => {
+      if (this.turn?.msg === assistant) this.deliver(c);
+    });
+  }
+
+  private lastContext = "";
+
+  private async withStudioContext(content: unknown[]): Promise<unknown[]> {
+    const get = this.deps.studioContext;
+    if (!get) return content;
+    const line = await Promise.race([get().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 1500))]);
+    if (!line || line === this.lastContext) return content;
+    this.lastContext = line;
+    return [...content, { type: "text", text: `<studio>${line}</studio>` }];
+  }
+
+  /** Start Claude Code ahead of the first message (the user is typing): saves its start-up time. */
+  warm() {
+    if (this.status !== "idle" || !this.conv) return;
+    const settings = this.deps.getSettings();
+    const fp = fingerprint(settings);
+    if (this.proc && this.fingerprint === fp && !this.restartNext) return;
+    this.kill();
+    try {
+      this.spawn(settings, fp);
+      this.touch();
+    } catch {
+      // The next message reports the problem.
+    }
   }
 
   /** Summarize the conversation so far (Claude Code's /compact), shown as a divider in the chat. */
   private compactNow(instructions: string) {
     const conv = this.conv!;
-    if (!conv.claudeSessionId && !this.proc) {
+    if (!conv.claudeSessionId && !conv.messages.some((m) => m.role === "user")) {
       bus.emitEvent({ type: "toast", level: "info", message: "Nothing to compact yet: this chat has no Claude context." });
       this.next();
       return;
@@ -257,31 +291,38 @@ class ClaudeSession {
     conversations.save(conv);
     this.emitMessage(true);
     this.setContext({ compacting: true });
+    // The summary may drop the last Studio context line: send it again next time.
+    this.lastContext = "";
     this.deliver([{ type: "text", text: instructions ? `/compact ${instructions}` : "/compact" }]);
   }
 
   private deliver(content: unknown[]) {
     const line = JSON.stringify({ type: "user", message: { role: "user", content }, parent_tool_use_id: null }) + "\n";
-
-    const settings = this.deps.getSettings();
-    const fp = fingerprint(settings);
-    if (this.proc && (this.fingerprint !== fp || this.restartNext)) this.kill();
-    if (!this.proc) {
-      this.setStatus("starting");
-      try {
-        this.spawn(settings, fp);
-      } catch (err) {
-        this.fail(err instanceof Error ? err.message : String(err));
-        return;
-      }
-    }
+    if (!this.ensureProc()) return;
     this.setStatus("running");
     this.proc!.stdin!.write(line);
     this.touch();
   }
 
+  /** A Claude Code process with the current settings (restarted when they changed). */
+  private ensureProc(): boolean {
+    const settings = this.deps.getSettings();
+    const fp = fingerprint(settings);
+    if (this.proc && (this.fingerprint !== fp || this.restartNext)) this.kill();
+    if (this.proc) return true;
+    this.setStatus("starting");
+    try {
+      this.spawn(settings, fp);
+      return true;
+    } catch (err) {
+      this.fail(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
   private spawn(settings: Settings, fp: string) {
     const conv = this.conv!;
+    if (!conv.claudeSessionId) this.lastContext = "";
     mkdirSync(settings.workspaceDir, { recursive: true });
     mkdirSync(RUN_DIR, { recursive: true });
     writeFileSync(PROMPT_FILE, FORGE_SYSTEM_PROMPT);
@@ -348,6 +389,8 @@ class ClaudeSession {
     proc.on("error", (err) => {
       if (this.proc !== proc) return;
       this.proc = null;
+      // A pre-warmed process failing to start is reported when a message is actually sent.
+      if (!this.turn) return;
       const msg = (err as NodeJS.ErrnoException).code === "ENOENT"
         ? `Claude Code CLI not found ("${settings.claudePath}"). Install it (npm i -g @anthropic-ai/claude-code) or set its path in Settings.`
         : err.message;
@@ -356,8 +399,12 @@ class ClaudeSession {
     proc.on("exit", (code) => {
       if (this.proc !== proc) return;
       this.proc = null;
-      if (this.status === "idle") return;
       const tail = this.stderr.join("\n").trim();
+      if (this.status === "idle") {
+        // A pre-warmed process whose saved session is gone: the next one starts fresh.
+        if (!this.sawOutput && conv.claudeSessionId && /no conversation found/i.test(tail)) conv.claudeSessionId = undefined;
+        return;
+      }
       // A stale --resume id: retry once as a fresh session.
       if (!this.sawOutput && conv.claudeSessionId && !this.resumeRetried && /no conversation found|session/i.test(tail)) {
         this.resumeRetried = true;
@@ -754,6 +801,10 @@ export class ClaudeManager {
 
   stop(convId: string) {
     this.sessions.get(convId)?.stop();
+  }
+
+  warm(convId: string) {
+    if (conversations.get(convId)) this.session(convId).warm();
   }
 
   /** Compact a conversation now (queued behind a running reply). */

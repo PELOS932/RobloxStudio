@@ -323,6 +323,16 @@ export async function sendMessage(text: string, images?: { mediaType: string; da
   socket.send({ type: "chat.send", convId: id, text, images });
 }
 
+const warmedAt: Record<string, number> = {};
+
+/** The user is typing: have the server start Claude Code now (at most every 20 s per chat). */
+export function warmConversation(id: string) {
+  const now = Date.now();
+  if (now - (warmedAt[id] ?? 0) < 20_000) return;
+  warmedAt[id] = now;
+  socket.send({ type: "chat.warm", convId: id });
+}
+
 export function stopConversation(id: string) {
   socket.send({ type: "chat.stop", convId: id });
 }

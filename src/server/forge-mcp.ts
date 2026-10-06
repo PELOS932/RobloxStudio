@@ -9,7 +9,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { assets, bus, games, shortId } from "./store.ts";
 import { importAsset, pullSelection } from "./importer.ts";
-import { resultText, type StudioBridge, type ToolCallResult } from "./studio-bridge.ts";
+import { resultText, unquote, type StudioBridge, type ToolCallResult } from "./studio-bridge.ts";
 import { MCP_TOKEN } from "./config.ts";
 import {
   applyModelEdit, expandModelInput, expandParts, ModelEditSchema, ModelSpecInputSchema, PartInputSchema, sanitizeModelSpec, toNativeModel,
@@ -25,7 +25,10 @@ import { applyVfxEdit, sanitizeVfxSpec, VfxEditSchema, VfxSpecSchema, vfxSummary
 import { scriptsToLuau } from "../shared/to-luau.ts";
 import { AbilityEditSchema, AbilitySpecSchema, applyAbilityEdit, ATTACH_POINTS, sanitizeAbilitySpec } from "../shared/ability.ts";
 import { resolveStored } from "./importer.ts";
-import { editLuau, LIGHTING_PRESETS, lightingLuau, queryLuau, scriptSearchLuau, terrainLuau, undoLuau, type EditOp, type TerrainOp } from "../shared/studio-ops.ts";
+import {
+  auditLuau, editLuau, LIGHTING_PRESETS, lightingLuau, parseScriptRead, queryLuau, scriptPatchLuau, scriptReadLuau, scriptSearchLuau, terrainLuau, undoLuau,
+  type EditOp, type TerrainOp,
+} from "../shared/studio-ops.ts";
 import { ID_PREFIX, sizeLabel, summarize, type Asset, type HtmlSource } from "../shared/assets.ts";
 import type { HtmlConvertRequest, ImportResult, PermissionRequest, Settings } from "../shared/protocol.ts";
 
@@ -42,6 +45,12 @@ interface ToolDef {
   advertise?: (s: JsonSchema) => JsonSchema;
   run: (args: any, ctx: Ctx) => Promise<ToolResult>;
 }
+
+/**
+ * Tools that only read. Claude Code runs read-only tools of one reply in parallel instead of
+ * one after another, so several lookups cost one wait.
+ */
+const READ_ONLY = new Set(["list_assets", "get_asset", "studio_query", "studio_scripts", "studio_inspect", "studio_screenshot", "studio_console", "studio_state", "studio_audit"]);
 
 interface Ctx {
   convId: string;
@@ -81,6 +90,9 @@ function slim(node: unknown, isPropertyMap = false): unknown {
       if (k === "pattern" || k === "maxLength" || k === "minLength") continue;
       if (k === "maxItems" && typeof v === "number" && v >= 50) continue;
       if (k === "minItems" && v === 1 && !("maxItems" in node && (node as JsonSchema).maxItems < 50)) continue;
+      // Fixed-length tuples whose description already spells out the shape ("[x,y,z]").
+      const n = node as JsonSchema;
+      if ((k === "minItems" || k === "maxItems") && n.minItems === n.maxItems && typeof n.description === "string" && /\[[^\]]*,[^\]]*\]/.test(n.description)) continue;
     }
     out[k] = slim(v, !isPropertyMap && k === "properties");
   }
@@ -128,14 +140,15 @@ export class ForgeMcp {
   /** Set by the host: shows a progress line on a running tool call (by full tool name). */
   progressSink?: (convId: string, toolName: string, text: string) => void;
   /** tools/list result, built once: the list is static (it is part of Claude's cached prompt). */
-  private listed: { name: string; description: string; inputSchema: any }[];
+  private listed: { name: string; description: string; inputSchema: any; annotations?: { readOnlyHint: boolean } }[];
 
   constructor(private deps: ForgeDeps) {
     this.tools = this.defineTools();
     this.byName = new Map(this.tools.map((t) => [t.name, t]));
     this.listed = this.tools.map((t) => {
       const schema = jsonSchema(t.schema);
-      return { name: t.name, description: t.description, inputSchema: t.advertise ? t.advertise(schema) : schema };
+      const inputSchema = t.advertise ? t.advertise(schema) : schema;
+      return { name: t.name, description: t.description, inputSchema, ...(READ_ONLY.has(t.name) ? { annotations: { readOnlyHint: true } } : {}) };
     });
   }
 
@@ -591,9 +604,9 @@ export class ForgeMcp {
       {
         name: "studio_query",
         description:
-          "Find instances in Studio and read properties in one call. Filters: path (root, default Workspace), class (IsA), name (substring, or Lua pattern), tag, attr, depth. props lists properties to show (also Pivot, Tags, Attributes, Children). tree: true prints an indented outline instead (depth default 2) with class counts for collapsed branches.",
+          "Find instances in Studio and read properties in one call. Filters: path (root, default Workspace; \"@selection\": the selection and its contents), class (IsA), name (substring or Lua pattern), tag, attr, depth. props: properties to show, plus Pivot, Tags, Attributes, Children, Bounds (size at center), Parts (count), Lines. tree: true prints an outline instead (depth default 2) with class counts for collapsed branches.",
         schema: z.object({
-          path: z.string().optional().describe("dot path, e.g. Workspace.Map; game for everything"),
+          path: z.string().optional().describe("dot path, e.g. Workspace.Map; game for everything; @selection"),
           class: z.string().optional().describe("e.g. BasePart, Model, Script"),
           name: z.string().optional(),
           tag: z.string().optional(),
@@ -608,11 +621,11 @@ export class ForgeMcp {
       {
         name: "studio_edit",
         description:
-          "Change Studio in one undoable step with a list of ops. set {path|query, props}: properties by name with JSON values converted to the property's type (Vector3 [x,y,z], Color3 \"#hex\", UDim2 [xs,xo,ys,yo], CFrame {pos,rot}, enums by name, \"@Path\" for instance refs, sequences like create_vfx; pseudo-props Pivot, Tags, Attributes, Parent). create {class, parent?, name?, props?, children?: [{class,name,props,children}]} (parts are anchored unless props say otherwise). delete {path|query}. clone {path, count?, offset? [x,y,z] per copy, parent?, name?}. move {path|query, by?, rotate? degrees, to? {pos,rot}, parent?}. select {paths}. query = studio_query filters.",
+          "Change Studio in one undoable step. target = path (\"@selection\": all selected), paths, or query (studio_query filters). Ops: set {target, props} (JSON converted to each property's type: Vector3 [x,y,z], Color3 \"#hex\", UDim2 [xs,xo,ys,yo], CFrame {pos,rot}, enum names, \"@Path\" refs; pseudo-props Pivot, Tags, Attributes, Parent). create {class, parent?, name?, props?, children?: [{class,name,props,children}]} (parts anchored by default). delete {target}. clone {path, count?, offset? per copy, parent?, name?}. move {target, by?, rotate? degrees, to? {pos,rot}, parent?}. group {target, name?, class? Model|Folder}, ungroup {target}. weld {target, to?, unanchor?}: one rigid body. scale {target, factor}. focus {path?}: aim the user's camera. insert {assetId, at? ground point (default: camera focus), parent?}: Creator Store model. select {target}.",
         schema: z.object({
-          ops: z.array(z.object({ op: z.enum(["set", "create", "delete", "clone", "move", "select"]) }).catchall(z.any())).min(1).max(200),
+          ops: z.array(z.object({ op: z.enum(["set", "create", "delete", "clone", "move", "group", "ungroup", "weld", "scale", "focus", "insert", "select"]) }).catchall(z.any())).min(1).max(200),
         }),
-        advertise: (s) => looseItems(s, { ops: "[{op: set|create|delete|clone|move|select, ...fields as described}]" }),
+        advertise: (s) => looseItems(s, { ops: "[{op, ...fields as described}]" }),
         run: async ({ ops }, ctx) => this.job(editLuau(ops as EditOp[]), ctx, `Applying ${ops.length} change${ops.length > 1 ? "s" : ""}`),
       },
       {
@@ -623,15 +636,42 @@ export class ForgeMcp {
       },
       {
         name: "studio_scripts",
-        description: "Search the source of every script in the place (pattern: case-insensitive text, or a Lua pattern with regex: true), returning path:line matches with optional context lines. Without a pattern, lists scripts with line counts.",
+        description: "Scripts in the place. read: numbered source of scripts, each \"Path\" or \"Path:from-to\". pattern: search all sources (case-insensitive text, or Lua pattern with regex) for path:line matches with optional context lines. Neither: list scripts with line counts.",
         schema: z.object({
+          read: z.array(z.string()).max(20).optional().describe('e.g. ["ServerScriptService.Main", "ReplicatedStorage.Util:40-90"]'),
           pattern: z.string().optional(),
           regex: z.boolean().optional(),
           path: z.string().optional().describe("search under this path (default whole game)"),
           context: z.number().int().min(0).max(3).optional(),
           limit: z.number().int().min(1).max(300).optional(),
         }),
-        run: async (q, ctx) => this.job(scriptSearchLuau(q), ctx, q.pattern ? "Searching scripts" : "Listing scripts"),
+        run: async ({ read, ...q }, ctx) => {
+          if (!read?.length) return this.job(scriptSearchLuau(q), ctx, q.pattern ? "Searching scripts" : "Listing scripts");
+          const reading = await this.job(scriptReadLuau(read.map(parseScriptRead)), ctx, `Reading ${read.length} script${read.length > 1 ? "s" : ""}`);
+          if (!q.pattern) return reading;
+          const found = await this.job(scriptSearchLuau(q), ctx, "Searching scripts");
+          return { content: [...reading.content, ...found.content] };
+        },
+      },
+      {
+        name: "studio_script_patch",
+        description:
+          "Edit several scripts in one call (one undo step). Each: path plus edits [{old, new, all?}] (exact text without line numbers; old must match once unless all) or source (whole script; creates it if missing, with class). Prefer edits for changes.",
+        schema: z.object({
+          scripts: z.array(z.object({
+            path: z.string().describe("e.g. ServerScriptService.Main"),
+            edits: z.array(z.object({ old: z.string(), new: z.string(), all: z.boolean().optional() })).optional(),
+            source: z.string().optional(),
+            class: z.enum(["Script", "LocalScript", "ModuleScript"]).optional().describe("when creating"),
+          })).min(1).max(30),
+        }),
+        run: async ({ scripts }, ctx) => this.job(scriptPatchLuau(scripts), ctx, `Editing ${scripts.length} script${scripts.length > 1 ? "s" : ""}`),
+      },
+      {
+        name: "studio_audit",
+        description: "Check the place (or one path) for what breaks or slows a game: parts that will fall or vanish at play, scripts in places they never run, LocalPlayer in server scripts, deprecated APIs (wait, spawn, :connect, BodyMovers), invisible colliders, duplicate parts, heavy models, missing SpawnLocation, shadow-casting lights.",
+        schema: z.object({ path: z.string().optional().describe("default the whole place") }),
+        run: async ({ path }, ctx) => this.job(auditLuau(path ?? "game"), ctx, "Auditing the place"),
       },
       {
         name: "studio_lighting",
@@ -669,35 +709,6 @@ export class ForgeMcp {
         run: async ({ path }) => {
           this.requireBuiltin("Inspect");
           return this.studio("inspect_instance", { path });
-        },
-      },
-      {
-        name: "studio_script_read",
-        description: "Read a script's source from Studio.",
-        schema: z.object({
-          path: z.string().describe("e.g. game.ServerScriptService.Main"),
-          start_line: z.number().int().optional(),
-          end_line: z.number().int().optional(),
-        }),
-        run: async ({ path, start_line, end_line }) => {
-          this.requireBuiltin("Script reading");
-          const args: Record<string, unknown> = { target_file: path, should_read_entire_file: start_line === undefined };
-          if (start_line !== undefined) args.start_line_one_indexed = start_line;
-          if (end_line !== undefined) args.end_line_one_indexed_inclusive = end_line;
-          return this.studio("script_read", args);
-        },
-      },
-      {
-        name: "studio_script_edit",
-        description: "Edit a script in Studio with exact string replacements (creates the script if it doesn't exist).",
-        schema: z.object({
-          path: z.string().describe("e.g. game.ServerScriptService.Main"),
-          edits: z.array(z.object({ old_string: z.string(), new_string: z.string(), replace_all: z.boolean().optional() })).min(1),
-          class_name: z.enum(["Script", "LocalScript", "ModuleScript"]).optional().describe("when creating"),
-        }),
-        run: async ({ path, edits, class_name }) => {
-          this.requireBuiltin("Script editing");
-          return this.studio("multi_edit", { file_path: path, edits, ...(class_name ? { className: class_name } : {}) });
         },
       },
       {
@@ -756,7 +767,7 @@ export class ForgeMcp {
       },
       {
         name: "permission_prompt",
-        description: "Internal hook used by the host to ask the user for permission. Never call this tool yourself.",
+        description: "Internal (permission prompts). Never call it.",
         schema: z.object({ tool_name: z.string(), input: z.any(), tool_use_id: z.string().optional() }),
         run: async ({ tool_name, input }, ctx) => {
           const allow = await this.askUser(ctx.convId, tool_name, input);
@@ -787,7 +798,7 @@ export class ForgeMcp {
 }
 
 /** Tools that run arbitrary code in Studio ask for permission unless auto-approve is on. */
-const GATED = new Set(["studio_execute_luau", "studio_script_edit"]);
+const GATED = new Set(["studio_execute_luau", "studio_script_patch"]);
 
 function clip(s: string): string {
   return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + `\n… [truncated ${s.length - MAX_TEXT} chars]` : s;
@@ -801,20 +812,6 @@ function forward(res: ToolCallResult): ToolResult {
   }
   if (!content.length) content.push({ type: "text", text: resultText(res) || "(empty result)" });
   return { content, ...(res.isError ? { isError: true } : {}) };
-}
-
-/** execute_luau may hand back a returned string JSON-quoted; show it as plain text. */
-function unquote(out: string): string {
-  const t = out.trim();
-  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
-    try {
-      const v = JSON.parse(t);
-      if (typeof v === "string") return v;
-    } catch {
-      // Not JSON: keep as is.
-    }
-  }
-  return t;
 }
 
 /** The Output lines of this run (what was already there before is skipped), problems first, kept short. */

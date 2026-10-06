@@ -132,11 +132,22 @@ export function describeCall(b: ToolBlock, assetName?: (id: string) => string | 
       return { label: "Edit Studio", args: ops.length ? `${plural(ops.length, "change")} (${kinds.join(", ")})` : "" };
     }
     case "studio_undo": return { label: input.redo ? "Redo in Studio" : "Undo in Studio", args: input.steps && input.steps > 1 ? `${input.steps} steps` : "" };
-    case "studio_scripts": return { label: input.pattern ? "Search scripts" : "List scripts", args: input.pattern ? `"${input.pattern}"` : field("path") ?? "" };
+    case "studio_scripts": {
+      const reads = Array.isArray(input.read) ? (input.read as string[]) : [];
+      if (reads.length) return { label: reads.length > 1 ? "Read scripts" : "Read script", args: oneLine(reads.map((r) => r.split(".").pop()).join(", "), 80) };
+      return { label: input.pattern ? "Search scripts" : "List scripts", args: input.pattern ? `"${input.pattern}"` : field("path") ?? "" };
+    }
+    case "studio_script_patch": {
+      const list = Array.isArray(input.scripts) ? (input.scripts as { path?: string; edits?: unknown[] }[]) : [];
+      const edits = list.reduce((n, s) => n + (Array.isArray(s.edits) ? s.edits.length : 1), 0);
+      return { label: list.length > 1 ? "Edit scripts" : "Edit script", args: [oneLine(list.map((s) => s.path?.split(".").pop()).filter(Boolean).join(", "), 70), edits ? plural(edits, "edit") : ""].filter(Boolean).join(" · ") };
+    }
+    case "studio_audit": return { label: "Audit place", args: field("path") ?? "" };
     case "studio_lighting": return { label: "Lighting", args: [input.preset, input.lighting && Object.keys(input.lighting).join(", ")].filter(Boolean).join(" · ") };
     case "studio_terrain": return { label: "Terrain", args: Array.isArray(input.ops) ? (input.ops as { op?: string }[]).map((o) => o.op).join(", ") : "" };
     case "studio_playtest": return { label: input.mode === "stop" ? "Stop play-test" : input.mode === "start" ? "Start play-test" : "Play-test", args: input.mode && input.mode !== "test" ? "" : `${input.seconds ?? 5}s` };
     case "studio_inspect": return { label: "Inspect", args: field("path") ?? "" };
+    // Older chats used these.
     case "studio_script_read": return { label: "Read script", args: field("path") ?? "" };
     case "studio_script_edit": return { label: "Edit script", args: [field("path"), count(input.edits) ? plural(count(input.edits), "edit") : ""].filter(Boolean).join(" · ") };
     case "studio_screenshot": return { label: "Studio screenshot", args: "" };

@@ -97,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoImport: true,
   longCache: true,
   autoCompact: 200_000,
+  studioContext: true,
   claudePath: process.env.CLAUDE_PATH ?? "claude",
   workspaceDir: join(DATA_DIR, "workspace"),
   studio: { command: "", args: [], autoConnect: true },

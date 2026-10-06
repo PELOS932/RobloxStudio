@@ -105,6 +105,9 @@ function General({ s }: { s: Settings }) {
       <Toggle on={s.autoApproveLuau} onChange={(v) => void updateSettings({ autoApproveLuau: v })} title="Let Claude run Luau in Studio without asking">
         Off: you approve each Luau snippet and script edit. Imports of assets never need approval.
       </Toggle>
+      <Toggle on={s.studioContext} onChange={(v) => void updateSettings({ studioContext: v })} title="Tell Claude what you have selected in Studio">
+        Each message carries one short line about your Studio selection and what the camera looks at, so "make this red" works without a lookup.
+      </Toggle>
       <Toggle on={s.longCache} onChange={(v) => void updateSettings({ longCache: v })} title="1-hour prompt cache">
         Keeps the conversation cached while you test in Studio, so coming back after a break doesn't re-send the whole context.
       </Toggle>

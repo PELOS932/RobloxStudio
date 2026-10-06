@@ -27,6 +27,8 @@ export interface Settings {
   longCache: boolean;
   /** When Claude Code compacts the conversation: "auto", "off" or about this many tokens. */
   autoCompact: AutoCompact;
+  /** Send the Studio selection and camera focus along with each message (saves a lookup call). */
+  studioContext: boolean;
   claudePath: string;
   workspaceDir: string;
   studio: { command: string; args: string[]; autoConnect: boolean };
@@ -240,6 +242,8 @@ export interface HtmlConvertRequest {
 export type ClientEvent =
   | { type: "chat.send"; convId: string; text: string; images?: { mediaType: string; data: string }[] }
   | { type: "chat.stop"; convId: string }
+  /** The user is typing: start Claude Code now so the first reply comes sooner. */
+  | { type: "chat.warm"; convId: string }
   | { type: "chat.compact"; convId: string; instructions?: string }
   | { type: "chat.unqueue"; convId: string; id: string }
   | { type: "permission.respond"; id: string; allow: boolean; always?: boolean }
